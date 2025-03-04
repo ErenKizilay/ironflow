@@ -62,28 +62,27 @@ impl Engine {
     }
 
     pub async fn start(&self) {
-        println!("Starting Engine");
+        tracing::info!("Starting Engine");
         let arc = self.workflow_executor.clone();
         self.task_tracker.spawn(async move {
             arc.listen().await;
         });
-        println!("Engine started");
+        tracing::info!("Engine started");
     }
 
     pub async fn stop(self) {
         match signal::ctrl_c().await {
             Ok(_) => {
-                println!("Engine will stop");
+                tracing::info!("Shutting down Engine");
                 drop(self.repository);
                 self.workflow_executor.stop().await;
                 drop(self.workflow_executor);
                 self.task_tracker.close();
-                println!("Engine closed");
                 self.task_tracker.wait().await;
-                println!("Engine stopped");
+                tracing::info!("Engine stopped");
             }
             Err(_) => {
-                println!("Failed to install CTRL-C handler");
+                tracing::error!("Failed to install CTRL-C handler");
             }
         }
     }
@@ -95,7 +94,7 @@ impl Engine {
             .filter(|authentication_provider| workflow.config.auth_providers.contains(&authentication_provider.name))
             .cloned()
             .collect::<Vec<AuthenticationProvider>>();
-        println!("Will run workflow: {}", workflow.id);
+        tracing::info!("Will run workflow: {}", workflow.id);
         self.workflow_executor
             .start(workflow.clone(), execution_id, input, auth_providers)
             .await;

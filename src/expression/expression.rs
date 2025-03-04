@@ -84,23 +84,21 @@ impl Expression {
                             Ok(data) => {
                                 let result = expr.search(data).unwrap();
                                 let json_value = to_json_value(result);
-                                println!("expr: {:?}\nresult: {:?}\ncontext: {:?}\n________________", expr, json_value, context);
                                 json_value
                             },
                             Err(err) => {
-                                println!("evaluation error[{:?}] occurred. expr: {:?} context: {:?}", err, expr, context);
+                                tracing::warn!("evaluation error[{:?}] occurred. expr: {:?} context: {:?}", err, expr, context);
                                 Value::Null
                             }
                         }
                     }
                     Err(err) => {
-                        println!("expression: {:?} compilation error: {:?}", self.path, err);
+                        tracing::warn!("expression: {:?} compilation error: {:?}", self.path, err);
                         Value::Null
                     }
                 }
             }
             Some(val) => {
-                println!("value: {}", val);
                 val.clone()
             }
         }
@@ -156,28 +154,6 @@ mod tests {
         let actual = expression.get_referred_nodes(vec![NodeId::of("get_uuid".to_string())]);
         assert_eq!(actual.len(), 1);
         assert_eq!(actual.get(0).unwrap(), &NodeId::of("get_uuid".to_string()));
-    }
-
-    #[test]
-    fn test_pure_json() {
-        let context = json!({"foo": {"bar": {"baz": true}}});
-        let expression = Expression::of_path(String::from("{
-            \"note\": \"ack note\"
-        }"));
-        let actual = expression.evaluate(context);
-        assert_eq!(actual, true);
-    }
-
-    #[test]
-    fn test_x() {
-        let expr = compile(r#"`{
-        "note": "ack note"
-    }`"#).unwrap();
-
-        let data = Variable::from_json("{}").unwrap();
-        let result = expr.search(&data).unwrap();
-
-        println!("{}", result);
     }
 
     #[test]

@@ -132,9 +132,29 @@ pub struct GraphBuilder {
     pub id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct  WorkflowConfiguration {
     pub auth_providers: Vec<String>,
+    pub max_retry_count: Option<usize>,
+}
+impl Default for WorkflowConfiguration {
+    fn default() -> Self {
+        WorkflowConfiguration {
+            auth_providers: vec![],
+            max_retry_count: Some(5),
+        }
+    }
+}
+
+impl WorkflowConfiguration {
+
+    pub(crate) fn merge(&self) -> WorkflowConfiguration {
+        let default = WorkflowConfiguration::default();
+        WorkflowConfiguration {
+            auth_providers: self.auth_providers.clone(),
+            max_retry_count: self.max_retry_count.or(default.max_retry_count),
+        }
+    }
 }
 
 impl BranchBuilder {

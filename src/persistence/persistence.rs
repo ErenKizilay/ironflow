@@ -8,6 +8,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
+#[derive(Debug)]
 pub struct Repository {
     workflows: Mutex<HashMap<String, Graph>>,
     workflow_executions: Arc<Mutex<HashMap<String, WorkflowExecution>>>,
@@ -49,20 +50,18 @@ impl Repository {
         match existing {
             None => {
                 node_execs.lock().unwrap().insert(state_id, state.clone());
-                self.sender.send(state.clone()).await.expect("TODO: cannot send message");
-                println!("Sent state message: {:?}", state);
+                self.sender.send(state.clone()).await.expect("Cannot send message");
                 Ok(state.clone())
             }
             Some(existing_state) => {
                 match &existing_state.status {
                     Status::Success => {
-                        println!("Node execution already succeed!");
+                        tracing::warn!("Node execution already succeed!");
                         Ok(existing_state.clone())
                     }
                     _ => {
                         node_execs.lock().unwrap().insert(state_id, state.clone());
-                        self.sender.send(state.clone()).await.expect("TODO: cannot send message");
-                        println!("Sent state message: {:?}", state);
+                        self.sender.send(state.clone()).await.expect("cannot send message");
                         Ok(state.clone())
                     }
                 }

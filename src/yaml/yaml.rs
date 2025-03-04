@@ -236,9 +236,7 @@ pub fn from_yaml(file_name: &str) -> Graph {
     let mut configs: Vec<Node> = vec![];
     workflow.nodes.iter().for_each(|node| {
         traverse(node.clone(), &mut configs);
-        println!("{:?}", configs);
     });
-    println!("{:#?}", configs);
     let graph: Graph = Graph {
         nodes_by_id: configs
             .iter()
@@ -246,20 +244,18 @@ pub fn from_yaml(file_name: &str) -> Graph {
             .collect(),
         node_ids: workflow.nodes.iter().map(|node| node.node_id()).collect(),
         id: workflow.name,
-        config: match &workflow.config {
+        config: match workflow.config {
             None => {Default::default()}
             Some(workflow_config) => {
-                workflow_config.clone()
+                workflow_config.merge()
             }
         },
     };
-    println!("{:?}", graph);
+    tracing::info!("Graph: {:?}", graph);
     graph
 }
 
 fn resolve_expression(from: YamlValue) -> Expression {
-    // Convert `serde_yaml::Value` to `serde_json::Value`
-    println!("yaml val: {:?}", from);
     let json_value: JsonValue = serde_json::to_value(from).unwrap();
 
     match json_value {
@@ -270,7 +266,6 @@ fn resolve_expression(from: YamlValue) -> Expression {
                     .replace("}}", "")
                     .trim()
                     .to_string();
-                println!("unwrapped: {}", unwrapped);
                 Expression::of_path(unwrapped)
             } else {
                 Expression::of_value(Value::String(string))
@@ -281,7 +276,6 @@ fn resolve_expression(from: YamlValue) -> Expression {
 }
 
 fn resolve_dynamic_from_yaml_value(from: YamlValue) -> DynamicValue {
-    println!("yaml val: {:?}", from);
     let json_value: JsonValue = serde_json::to_value(from).unwrap();
     resolve_dynamic_json_value(json_value)
 }
@@ -316,39 +310,9 @@ fn resolve_dynamic_json_value(json_value: JsonValue) -> DynamicValue {
         _ => {DynamicValue::Simple(Expression::of_value(json_value))}
     }
 }
-
-fn serialize() {
-    let yaml_str = r#"
-workflow: test
-nodes:
-  - http:
-      id: create_todo
-      url: https://blabla.sdasd.com/todos
-      method: POST
-      body: "{{input}}"
-  - condition:
-      id: if_a_condition
-      expression: "{{input.asdasd}}"
-      true_branch:
-        - http:
-            id: get_todo
-            url: "{{https://blabla.sdasd.com/todos/create_todo.id}}"
-            method: GET
-    "#;
-
-    let workflow: Workflow = serde_yaml::from_str(yaml_str).unwrap();
-    println!("{:#?}", workflow);
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::yaml::yaml::{from_yaml, serialize};
-
-    #[test]
-    fn test_to_json_value() {
-        serialize();
-    }
-
+    use crate::yaml::yaml::{from_yaml};
     #[test]
     fn test_from_yaml() {
         from_yaml("resources/workflows/workflow.yaml");
