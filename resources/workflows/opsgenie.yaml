@@ -1,0 +1,72 @@
+name: opsgenie
+config:
+  auth_providers:
+    - opsgenie
+nodes:
+  - !Http
+    id: create_alert
+    url: https://api.opsgenie.com/v2/alerts
+    method: POST
+    body:
+      message: "{{input.message}}"
+      description: "{{input.description}}"
+  - !Http
+    id: get_request
+    url: "{{join('', ['https://api.opsgenie.com/v2/alerts/requests/', create_alert.requestId])}}"
+    method: GET
+  - !Condition
+    id: if_created
+    expression: "{{get_request.data.isSuccess}}"
+    true_branch:
+      - !Http
+        id: ack_alert
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/acknowledge'])}}"
+        method: POST
+        body:
+          note: "hebelek"
+      - !Http
+        id: close_alert
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/close'])}}"
+        method: POST
+        body:
+          note: "resolved"
+      - !Http
+        id: add_note_to_alert
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/notes'])}}"
+        method: POST
+        body:
+          note: "a note from other side"
+      - !Http
+        id: add_tags_to_alert
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/tags'])}}"
+        method: POST
+        body:
+          tags:
+            - "hardcoded"
+            - "{{add_note_to_alert.requestId}}"
+      - !Http
+        id: get_alert
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId])}}"
+        method: GET
+      - !Assertion
+        id: assert_alert_fields
+        assertions:
+          - !Equals
+            left: "{{get_alert.data.message}}"
+            right: "{{input.message}}"
+          - !Equals
+            left: "{{get_alert.data.description}}"
+            right: "{{input.description}}"
+          - !Equals
+            left: "{{contains(get_alert.data.tags, 'hardcoded')}}"
+            right: true
+          - !Equals
+            left: "{{contains(get_alert.data.tags, add_note_to_alert.requestId)}}"
+            right: true
+          - !Equals
+            left: "{{get_alert.data.acknowledged}}"
+            right: true
+          - !Equals
+            left: "{{get_alert.data.status}}"
+            right: "closed"
+
