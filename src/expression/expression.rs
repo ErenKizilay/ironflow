@@ -11,7 +11,7 @@ pub struct Expression {
     pub value: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DynamicValue {
     Simple(Expression),
     Collection(Vec<DynamicValue>),

@@ -11,16 +11,6 @@ pub struct LambdaConfig {
     pub(crate) function_name: String,
 }
 
-struct StepConfig {
-    name: String,
-    target: StepTarget,
-}
-
-struct LoopConfig {
-    array_expression: String,
-    start_step_name: String,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ConditionConfig {
     pub expression: Expression,
@@ -39,7 +29,7 @@ impl NodeId {
     }
 }
 
-#[derive(Clone, Debug, Builder, PartialEq)]
+#[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]
 pub struct HttpConfig {
     pub url: DynamicValue,
     pub headers: HashMap<String, DynamicValue>,
@@ -49,43 +39,43 @@ pub struct HttpConfig {
     pub content_type: String,
 }
 
-#[derive(Clone, Debug, Builder, PartialEq)]
+#[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]
 pub struct BranchConfig {
     pub branches: Vec<Branch>,
 }
 
-#[derive(Clone, Debug, Builder, PartialEq)]
+#[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]
 pub struct AssertionConfig {
     pub assertions: Vec<AssertionItem>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Branch {
     pub name: String,
     pub condition: Option<Expression>,
     pub nodes: Vec<NodeId>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EqualToComparison {
     pub left: DynamicValue,
     pub right: DynamicValue,
     pub negate: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AssertionItem {
     Equal(EqualToComparison),
     NotEqual(EqualToComparison),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum StepTarget {
     Lambda(LambdaConfig),
     Http(HttpConfig),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NodeConfig {
     StepNode(StepTarget),
     ConditionNode(ConditionConfig),
@@ -93,13 +83,13 @@ pub enum NodeConfig {
     AssertionNode(AssertionConfig),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
     pub config: NodeConfig,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Graph {
     pub nodes_by_id: HashMap<NodeId, NodeConfig>,
     pub node_ids: Vec<NodeId>,
@@ -107,7 +97,7 @@ pub struct Graph {
     pub config: WorkflowConfiguration
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct ConditionNodeBuilder {
     node_id: NodeId,
     expression: Expression,
