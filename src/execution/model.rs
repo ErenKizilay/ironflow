@@ -2,6 +2,7 @@ use crate::auth::http::AuthenticationProvider;
 use crate::model::{Graph, NodeId};
 use serde_json::Value;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
 pub struct NodeExecutionState {
@@ -13,7 +14,7 @@ pub struct NodeExecutionState {
     pub depth: Vec<NodeId>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Execution {
     Step(StepExecution),
     Loop(LoopExecution),
@@ -22,7 +23,7 @@ pub enum Execution {
     Assertion(AssertionExecution),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StepExecution {
     pub retry_count: usize,
     pub result: Result<Value, StepExecutionError>
@@ -48,25 +49,25 @@ impl WorkflowExecution {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LoopExecution {
     pub iteration_count: usize,
     pub index: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConditionExecution {
     pub true_branch: bool,
     pub index: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AssertionExecution {
     pub passed: bool,
     pub errors: Vec<Option<String>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BranchExecution {
     pub branch_index: HashMap<String, usize>
 }
@@ -79,12 +80,12 @@ pub enum Status {
     Failure,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum  WorkflowExecutionError {
     StepFailed(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum  StepExecutionError {
     RunFailed(String),
 }
