@@ -8,15 +8,16 @@ mod persistence;
 mod yaml;
 mod auth;
 mod engine;
+mod listener;
 
 #[tokio::main]
 async fn main() {
     setup_logging();
-    let engine = Engine::new()
+    let mut engine = Engine::new()
+        .await
         .load_auth_providers_locally("resources/auth.yaml")
         .load_workflows_locally("resources/workflows")
         .await;
-    engine.start().await;
     let input = r#"
         {
             "message": "omg message",
@@ -24,7 +25,7 @@ async fn main() {
         }"#;
     engine.run_workflow("opsgenie".to_string(), "my_exec_1".to_string(), serde_json::from_str(input).unwrap())
         .await;
-    engine.stop().await;
+    engine.start().await;
 }
 
 fn setup_logging() {

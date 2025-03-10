@@ -3,15 +3,19 @@ use crate::model::{Graph, NodeId};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use uuid::Timestamp;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NodeExecutionState {
     pub workflow_id: String,
     pub execution_id: String,
+    pub state_id: String,
     pub node_id: NodeId,
     pub status: Status,
     pub execution: Option<Execution>,
     pub depth: Vec<NodeId>,
+    pub created_at: i64,
+    pub updated_at: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -30,7 +34,7 @@ pub struct StepExecution {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowExecution {
     pub execution_id: String,
     pub input: Value,
@@ -39,7 +43,8 @@ pub struct WorkflowExecution {
     pub result: Option<Result<Value, WorkflowExecutionError>>,
     pub state_keys_by_node_id: HashMap<NodeId, String>,
     pub workflow: Graph,
-    pub authentication_providers: Vec<AuthenticationProvider>
+    pub authentication_providers: Vec<AuthenticationProvider>,
+    pub started_at: i64
 }
 
 impl WorkflowExecution {
@@ -72,9 +77,10 @@ pub struct BranchExecution {
     pub branch_index: HashMap<String, usize>
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Status {
     Queued,
+    Running,
     Success,
     InProgress,
     Failure,

@@ -1,8 +1,8 @@
 use crate::execution::execution::ContinueParentNodeExecutionCommand;
 use crate::execution::model::{BranchExecution, Execution, NodeExecutionState, Status};
 use crate::model::{Branch, BranchConfig, ConditionConfig, NodeId};
-use crate::persistence::model::UpdateWorkflowExecutionRequest;
-use crate::persistence::persistence::Repository;
+use crate::persistence::model::{IncrementBranchIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest};
+use crate::persistence::persistence::{InMemoryRepository, Repository};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
         if let Execution::Branch(branch_exec) = parent_exec {
             match command.child_state {
                 None => {
-                    let queued_executions: Vec<(String, NodeExecutionState)> = branch_exec
+                    let queued_executions: Vec<WriteRequest> = branch_exec
                         .branch_index
                         .iter()
                         .map(|(branch_name, branch_index)| {
@@ -54,21 +54,19 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                 branch.nodes.get(branch_index.clone()).unwrap();
                             let child_state_id =
                                 format!("{}_{}", branch.name, child_node_id.name);
-                            (
-                                child_state_id,
-                                NodeExecutionState {
-                                    workflow_id: workflow.id.clone(),
-                                    execution_id: workflow_execution.execution_id.clone(),
-                                    node_id: child_node_id.clone(),
-                                    status: Status::Queued,
-                                    execution: None,
-                                    depth: path_so_far.clone(),
-                                },
-                            )
+                            WriteRequest::InitiateNodeExec(InitiateNodeExecDetails {
+                                node_id: child_node_id.clone(),
+                                state_id: child_state_id.clone(),
+                                dept: path_so_far.clone(),
+                            })
                         })
                         .collect();
-                    repository
-                        .initiate_node_executions(queued_executions)
+                    repository.port
+                        .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                            .workflow_id(workflow.id.clone())
+                            .execution_id(workflow_execution.execution_id.clone())
+                            .writes(queued_executions)
+                            .build())
                         .await;
                 }
                 Some(child_state) => {
@@ -79,30 +77,20 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                         });
                     if must_finish_branch_exec {
                         tracing::info!("Branch execution over!");
-                        repository
-                            .update_execution(
-                                UpdateWorkflowExecutionRequest::builder()
-                                    .workflow_id(workflow.id.clone())
-                                    .execution_id(workflow_execution.execution_id.clone())
-                                    .status(Status::InProgress)
-                                    .increment_index(parent_state.depth.is_empty())
-                                    .node_states_by_id(vec![(
-                                        parent_state_id,
-                                        NodeExecutionState {
-                                            workflow_id: workflow.id.clone(),
-                                            execution_id: workflow_execution
-                                                .execution_id
-                                                .clone(),
-                                            node_id: parent_state.node_id.clone(),
-                                            status: Status::Success,
-                                            execution: parent_state.execution.clone(),
-                                            depth: parent_state.depth.clone(),
-                                        },
-                                    )])
-                                    .state_keys(vec![])
-                                    .build(),
-                            )
-                            .await;
+                        repository.port
+                            .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                                .workflow_id(workflow.id.clone())
+                                .execution_id(workflow_execution.execution_id.clone())
+                                .write(WriteRequest::IncrementWorkflowIndex(IncrementWorkflowIndexDetails {
+                                    increment: parent_state.depth.is_empty(),
+                                    current_index: workflow_execution.index,
+                                }))
+                                .write(WriteRequest::UpdateNodeStatus(UpdateNodeStatusDetails {
+                                    node_id: parent_state.node_id.clone(),
+                                    state_id: parent_state_id.clone(),
+                                    status: Status::Success,
+                                }))
+                                .build()).await;
                     } else {
                         let branch = branch_node
                             .branches
@@ -118,37 +106,22 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                             let next_node_id = branch.nodes.get(branch_index.clone()).unwrap();
                             let next_state_id =
                                 format!("{}_{}", branch.name, next_node_id.name);
-                            repository
-                                .update_execution(
-                                    UpdateWorkflowExecutionRequest::builder()
-                                        .workflow_id(workflow.id.clone())
-                                        .execution_id(workflow_execution.execution_id.clone())
-                                        .status(Status::InProgress)
-                                        .increment_index(false)
-                                        .parent_execution_updates_by_state_id(HashMap::from([
-                                            (
-                                                parent_state_id.clone(),
-                                                Execution::Branch(BranchExecution {
-                                                    branch_index: branch_indexes,
-                                                }),
-                                            ),
-                                        ]))
-                                        .node_states_by_id(vec![(
-                                            next_state_id.clone(),
-                                            NodeExecutionState {
-                                                workflow_id: workflow.id.clone(),
-                                                execution_id: workflow_execution
-                                                    .execution_id
-                                                    .clone(),
-                                                node_id: next_node_id.clone(),
-                                                status: Status::Queued,
-                                                execution: None,
-                                                depth: path_so_far,
-                                            },
-                                        )])
-                                        .state_keys(vec![(next_node_id.clone(), next_state_id)])
-                                        .build(),
-                                )
+                            repository.port
+                                .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                                    .workflow_id(workflow.id.clone())
+                                    .execution_id(workflow_execution.execution_id.clone())
+                                    .write(WriteRequest::IncrementBranchIndex(IncrementBranchIndexDetails{
+                                        node_id: parent_state.node_id.clone(),
+                                        state_id: parent_state_id.clone(),
+                                        branch_name: branch.name.clone(),
+                                        current_branch_index: branch_index.clone(),
+                                    }))
+                                    .write(WriteRequest::InitiateNodeExec(InitiateNodeExecDetails {
+                                        node_id: next_node_id.clone(),
+                                        state_id: next_state_id,
+                                        dept: path_so_far,
+                                    }))
+                                    .build())
                                 .await;
                         }
                     }
