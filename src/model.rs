@@ -19,6 +19,7 @@ pub struct ConditionConfig {
 }
 
 #[derive(Eq, Hash, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct NodeId {
     pub name: String,
 }

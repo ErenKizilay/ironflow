@@ -82,9 +82,17 @@ impl Expression {
                         let evaluation_result = Variable::from_json(context_json.as_str());
                         match evaluation_result {
                             Ok(data) => {
-                                let result = expr.search(data).unwrap();
-                                let json_value = to_json_value(result);
-                                json_value
+                                let result = expr.search(data);
+                                match result {
+                                    Ok(search_result) => {
+                                        let json_value = to_json_value(search_result);
+                                        json_value
+                                    }
+                                    Err(err) => {
+                                        tracing::warn!("search error[{:?}] occurred. expr: {:?} context: {:?}", err, expr, context);
+                                        Value::Null
+                                    }
+                                }
                             },
                             Err(err) => {
                                 tracing::warn!("evaluation error[{:?}] occurred. expr: {:?} context: {:?}", err, expr, context);

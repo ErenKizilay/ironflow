@@ -1,9 +1,8 @@
 use crate::auth::http::AuthenticationProvider;
 use crate::model::{Graph, NodeId};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use uuid::Timestamp;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NodeExecutionState {
@@ -34,7 +33,7 @@ pub struct StepExecution {
 }
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkflowExecution {
     pub execution_id: String,
     pub input: Value,
@@ -86,7 +85,7 @@ pub enum Status {
     Failure,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum  WorkflowExecutionError {
     StepFailed(String),
 }

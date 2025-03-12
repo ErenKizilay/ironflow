@@ -1,3 +1,4 @@
+use uuid::Uuid;
 use crate::engine::Engine;
 
 mod execution;
@@ -23,8 +24,7 @@ async fn main() {
             "message": "omg message",
             "description": "desc description"
         }"#;
-    engine.run_workflow("opsgenie".to_string(), "my_exec_1".to_string(), serde_json::from_str(input).unwrap())
-        .await;
+    //engine.run_workflow("opsgenie".to_string(), Uuid::new_v4().to_string(), serde_json::from_str(input).unwrap()).await;
     engine.start().await;
 }
 

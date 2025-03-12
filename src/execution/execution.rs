@@ -55,7 +55,7 @@ impl WorkflowExecutor {
     }
 
     //#[tracing::instrument]
-    pub async fn continue_execution(&self, state: &NodeExecutionState) {
+    pub async fn continue_execution(&self, state: &NodeExecutionState) -> Result<(), String> {
         let workflow_execution = self.repository.port
             .get_workflow_execution(&state.workflow_id, &state.execution_id)
             .await
@@ -78,12 +78,12 @@ impl WorkflowExecutor {
                         .write(WriteRequest::UpdateWorkflowStatus(Status::Success))
                         .build()).await;
             }
-            return;
+            return Ok(());
         }
         tracing::info!("Node[{}] execution status: {:?}", state.node_id.name, status);
         match status {
             Status::Queued => {
-                let state_id = state.clone().node_id.name;
+                let state_id = state.state_id.clone();
                 let retry_count = resolve_retry_count(state);
                 self.repository.port
                     .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
@@ -188,7 +188,8 @@ impl WorkflowExecutor {
             Status::Running => {
                 tracing::debug!("Running node: {:?}", state.node_id.name);
             }
-        }
+        };
+        Ok(())
     }
 
     async fn continue_parent_node_exec(

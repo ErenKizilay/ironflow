@@ -7,32 +7,32 @@ pub struct AuthenticationProviders {
     pub providers_by_name: Map<String, AuthenticationProvider>
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct AuthenticationProvider {
     pub name: String,
     pub auth: HttpAuth,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct HttpAuth {
     pub host: String,
     pub strategy: AuthStrategy,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum AuthStrategy {
     Plain,
     Basic(BasicAuth),
     Token(TokenBasedAuth),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct TokenBasedAuth {
     pub name: String,
     pub value: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct BasicAuth {
     pub name: String,
     pub password: String,

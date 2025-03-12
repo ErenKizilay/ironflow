@@ -101,24 +101,23 @@ pub enum WriteRequest {
     UpdateNodeStatus(UpdateNodeStatusDetails),
     IncrementBranchIndex(IncrementBranchIndexDetails),
     IncrementConditionIndex(IncrementConditionIndexDetails),
-    PutNodeStateId(NodeId, String),
 
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UpdateNodeStatusDetails {
     pub node_id: NodeId,
     pub state_id: String,
     pub status: Status,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IncrementWorkflowIndexDetails {
     pub increment: bool,
     pub current_index: usize
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IncrementBranchIndexDetails {
     pub node_id: NodeId,
     pub state_id: String,
@@ -126,28 +125,28 @@ pub struct IncrementBranchIndexDetails {
     pub current_branch_index: usize
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LockNodeExecDetails {
     pub node_id: NodeId,
     pub state_id: String,
     pub retry_count: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IncrementConditionIndexDetails {
     pub node_id: NodeId,
     pub state_id: String,
     pub current_index: usize
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InitiateNodeExecDetails {
     pub node_id: NodeId,
     pub state_id: String,
     pub dept: Vec<NodeId>
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InitiateWorkflowExecDetails {
     pub input: Value,
     pub authentication_providers: Vec<AuthenticationProvider>,
