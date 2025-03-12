@@ -15,19 +15,20 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio_util::task::TaskTracker;
+use crate::aws_lambda::client::LambdaClient;
 use crate::execution::{assertion, branch, condition, step};
-use crate::yaml::yaml::Workflow;
+use crate::execution::step::StepExecutor;
 
 pub struct WorkflowExecutor {
     repository: Arc<Repository>,
-    http_client: Arc<HttpClient>,
+    step_executor: Arc<StepExecutor>
 }
 
 impl WorkflowExecutor {
-    pub fn new(repository: Arc<Repository>) -> Self {
+    pub async fn new(repository: Arc<Repository>) -> Self {
         Self {
             repository,
-            http_client: HttpClient::new(),
+            step_executor: StepExecutor::new().await
         }
     }
 
@@ -151,7 +152,6 @@ impl WorkflowExecutor {
                 if let Some(execution) = execution {
                     match execution {
                         Execution::Step(step_exec) => {
-                            //todo update workflow result if failure
                             let retry_count = resolve_retry_count(state);
                             let max_retry_count = graph.config.max_retry_count.unwrap();
                             let new_status = if retry_count > max_retry_count { Status::Failure } else { Status::InProgress };
@@ -175,11 +175,7 @@ impl WorkflowExecutor {
                                 .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                                     .workflow_id(state.workflow_id.clone())
                                     .execution_id(state.execution_id.clone())
-                                    .write(WriteRequest::UpdateNodeStatus(UpdateNodeStatusDetails {
-                                        node_id: state.node_id.clone(),
-                                        state_id: state.state_id.clone(),
-                                        status: Status::Failure,
-                                    }))
+                                    .write(WriteRequest::UpdateWorkflowStatus(Status::Failure))
                                     .build()).await;
                         }
                     }
@@ -286,7 +282,7 @@ impl WorkflowExecutor {
         let retry_count = resolve_retry_count(state);
         let (status, execution) = match config {
             NodeConfig::StepNode(step_target) => {
-                step::initiate_execution(self.http_client.clone(), retry_count, &step_target, &workflow_execution, final_context).await
+                step::initiate_execution(self.step_executor.clone(), retry_count, &step_target, &workflow_execution, final_context).await
             }
 
             NodeConfig::ConditionNode(condition_config) => {

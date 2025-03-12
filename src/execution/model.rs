@@ -43,7 +43,8 @@ pub struct WorkflowExecution {
     pub state_keys_by_node_id: HashMap<NodeId, String>,
     pub workflow: Graph,
     pub authentication_providers: Vec<AuthenticationProvider>,
-    pub started_at: i64
+    pub started_at: i64,
+    pub update_at: Option<i64>,
 }
 
 impl WorkflowExecution {

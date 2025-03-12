@@ -45,6 +45,10 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
         if let Execution::Branch(branch_exec) = parent_exec {
             match command.child_state {
                 None => {
+                    if branch_exec.branch_index.values().into_iter().any(|size|size.gt(&0))  {
+                        tracing::info!("Branch[{}] execution is already started", parent_state.node_id.name);
+                        return;
+                    }
                     let queued_executions: Vec<WriteRequest> = branch_exec
                         .branch_index
                         .iter()

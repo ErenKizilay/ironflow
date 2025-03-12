@@ -36,7 +36,7 @@ impl Listener {
         let repository = Repository::of_dynamodb().await;
         Listener {
             shutdown_receiver,
-            workflow_executor: Arc::new(WorkflowExecutor::new(Arc::new(repository))),
+            workflow_executor: Arc::new(WorkflowExecutor::new(Arc::new(repository)).await),
             receiver,
             message_deletion_sender: Arc::new(Mutex::new(message_deletion_tx)),
             task_tracker: TaskTracker::new(),
@@ -51,7 +51,7 @@ impl Listener {
         loop {
             tokio::select! {
                 Some(message) = receiver.recv() => {
-                    tracing::info!("Listener received state: {:?}", message);
+                    tracing::info!("Listener received state:\n{:#?}", message.node_execution_state);
                     let workflow_executor = self.workflow_executor.clone();
                     let mut message_deletion_sender = self.message_deletion_sender.clone();
                     self.task_tracker.spawn(async move {

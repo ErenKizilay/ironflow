@@ -1,36 +1,32 @@
 use crate::auth::http::AuthenticationProvider;
 use crate::expression::expression::{DynamicValue, Expression};
 use crate::model::NodeConfig::{AssertionNode, BranchNode};
-use crate::model::{AssertionConfig, AssertionItem, Branch, BranchConfig, ConditionConfig, EqualToComparison, Graph, HttpConfig, Node, NodeConfig, NodeId, WorkflowConfiguration};
+use crate::model::{AssertionConfig, AssertionItem, Branch, BranchConfig, ConditionConfig, EqualToComparison, Graph, HttpConfig, LambdaConfig, Node, NodeConfig, NodeId, WorkflowConfiguration};
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, Value};
 use serde_yaml::Value as YamlValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
 
 #[derive(Debug, Deserialize)]
-pub struct Workflow {
+struct Workflow {
     pub name: String,
     pub nodes: Vec<NodeValue>,
     pub config: Option<WorkflowConfiguration>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub enum NodeValue {
+enum NodeValue {
     Http(HttpDetails),
+    Lambda(LambdaDetails),
     Condition(ConditionDetails),
     Branch(BranchDetails),
     Assertion(AssertionDetails),
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct Http {
-    pub http: HttpDetails,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct HttpDetails {
+struct HttpDetails {
     pub id: String,
     pub url: YamlValue,
     pub method: String,
@@ -41,12 +37,19 @@ pub struct HttpDetails {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct Condition {
+struct LambdaDetails {
+    pub id: String,
+    pub function_name: String,
+    pub payload: Option<YamlValue>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Condition {
     pub condition: ConditionDetails,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct ConditionDetails {
+struct ConditionDetails {
     pub id: String,
     pub expression: String,
     pub true_branch: Option<Vec<NodeValue>>,
@@ -54,26 +57,26 @@ pub struct ConditionDetails {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct BranchDetails {
+struct BranchDetails {
     pub id: String,
     pub condition: Option<String>,
     pub branches: HashMap<String, Vec<NodeValue>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub enum AssertionDetail {
+enum AssertionDetail {
     Equals(EqualityCheck),
     NotEquals(EqualityCheck),
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct EqualityCheck {
+struct EqualityCheck {
     pub left: YamlValue,
     pub right: YamlValue,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct AssertionDetails {
+struct AssertionDetails {
     pub id: String,
     pub assertions: Vec<AssertionDetail>,
 }
@@ -90,6 +93,7 @@ impl NodeValue {
             NodeValue::Condition(condition_details) => NodeId::of(condition_details.id.clone()),
             NodeValue::Branch(branch_details) => {NodeId::of(branch_details.id.clone())}
             NodeValue::Assertion(assertion_details) => {NodeId::of(assertion_details.id.clone())}
+            NodeValue::Lambda(lambda_details) => {NodeId::of(lambda_details.id.clone())}
         }
     }
 }
@@ -217,6 +221,18 @@ fn traverse(node: NodeValue, configs: &mut Vec<Node>) {
                     .collect(),
             })))
         }
+        NodeValue::Lambda(lambda_details) => {
+            configs.push(Node::lambda(node.node_id(), LambdaConfig{
+                function_name: lambda_details.function_name.clone(),
+                payload: match lambda_details.payload.clone() {
+                    None => {
+                        DynamicValue::Simple(Expression::of_value(Value::Null))
+                    }
+                    Some(body_val) => {
+                        resolve_dynamic_from_yaml_value(body_val)
+                    }
+                }}));
+        }
     }
 }
 
@@ -228,7 +244,7 @@ pub fn from_yaml_to_auth(file_name: &str) -> AuthProviderDetails {
 }
 
 
-pub fn from_yaml(file_name: &str) -> Graph {
+pub fn from_yaml(file_name: &str) -> Result<Graph, String> {
     let mut file = File::open(file_name).unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
@@ -237,6 +253,15 @@ pub fn from_yaml(file_name: &str) -> Graph {
     workflow.nodes.iter().for_each(|node| {
         traverse(node.clone(), &mut configs);
     });
+    let node_ids: HashSet<NodeId> = configs.to_vec()
+        .iter()
+        .map(|node| node.id.clone())
+        .collect();
+
+    if node_ids.len().ne(&configs.len()) {
+        return Err("All node ids must be unique".to_string());
+    }
+
     let graph: Graph = Graph {
         nodes_by_id: configs
             .iter()
@@ -252,7 +277,7 @@ pub fn from_yaml(file_name: &str) -> Graph {
         },
     };
     tracing::info!("Graph: {:?}", graph);
-    graph
+    Ok(graph)
 }
 
 fn resolve_expression(from: YamlValue) -> Expression {
@@ -315,10 +340,10 @@ mod tests {
     use crate::yaml::yaml::{from_yaml};
     #[test]
     fn test_from_yaml() {
-        from_yaml("resources/workflows/workflow.yaml");
+        from_yaml("resources/workflows/workflow.yaml").unwrap();
     }
     #[test]
     fn test_from_yaml_og() {
-        from_yaml("resources/workflows/opsgenie.yaml");
+        from_yaml("resources/workflows/opsgenie.yaml").unwrap();
     }
 }

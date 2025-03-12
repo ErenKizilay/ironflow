@@ -6,7 +6,7 @@ use aws_sdk_dynamodb::primitives::DateTime;
 use aws_sdk_dynamodb::types::{AttributeValue, Get, Put, ReturnValuesOnConditionCheckFailure, TransactGetItem, TransactWriteItem, Update};
 use aws_sdk_dynamodb::Client;
 use serde_dynamo::{to_attribute_value, to_item};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
 use aws_sdk_dynamodb::config::http::HttpResponse;
@@ -40,7 +40,6 @@ impl DynamoDbRepository {
             .iter()
             .flat_map(|write_request: &WriteRequest| write_request.clone().to_transact_write_item(&request.identifier))
             .collect();
-        println!("Write items: {:?}", write_items);
         self.client.transact_write_items()
             .set_transact_items(Some(write_items))
             .send().await
@@ -55,7 +54,11 @@ impl DynamoDbRepository {
     }
 
     pub async fn get_node_executions(&self, workflow_id: &String, execution_id: &String, state_ids: Vec<String>) -> Vec<NodeExecutionState> {
-        let gets = state_ids.iter()
+        let unique_state_ids: HashSet<String> = state_ids.iter().cloned().collect();
+        if unique_state_ids.is_empty() {
+            return vec![];
+        }
+        let gets = unique_state_ids.iter()
             .map(|state_id| TransactGetItem::builder()
                 .get(Get::builder()
                     .table_name(get_node_executions_table_name())
@@ -134,7 +137,8 @@ impl WriteRequest {
                     state_keys_by_node_id: Default::default(),
                     workflow: initiate_workflow_exec_details.workflow,
                     authentication_providers: initiate_workflow_exec_details.authentication_providers,
-                    started_at: DateTime::from(SystemTime::now()).to_millis().unwrap(),
+                    started_at: now_i64(),
+                    update_at: None,
                 };
                 vec![TransactWriteItem::builder()
                     .put(Put::builder()
@@ -151,10 +155,12 @@ impl WriteRequest {
                         .update(Update::builder()
                             .table_name(get_workflow_executions_table_name())
                             .set_key(Some(build_workflow_execution_key(workflow_id, execution_id)))
-                            .update_expression("add #index :one")
+                            .update_expression("add #index :one set #updated_at = :updated_at")
                             .condition_expression("#index = :current_index")
                             .expression_attribute_names("#index", "index")
+                            .expression_attribute_names("#updated_at", "updated_at")
                             .expression_attribute_values(":one", AttributeValue::N("1".to_string()))
+                            .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
                             .expression_attribute_values(":current_index", to_attribute_value(increment_workflow_index_details.current_index).unwrap())
                             .build().unwrap())
                         .build()]
@@ -167,9 +173,13 @@ impl WriteRequest {
                     .update(Update::builder()
                         .table_name(get_workflow_executions_table_name())
                         .set_key(Some(build_workflow_execution_key(workflow_id, execution_id)))
-                        .update_expression("SET #status = :status")
-                        .condition_expression("#status <> :status")
+                        .update_expression("SET #status = :status, #updated_at = :updated_at")
+                        .condition_expression("NOT #status in (:success, :failure)")
                         .expression_attribute_names("#status", "status")
+                        .expression_attribute_names("#updated_at", "updated_at")
+                        .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
+                        .expression_attribute_values(":success", to_attribute_value(Status::Success).unwrap())
+                        .expression_attribute_values(":failure", to_attribute_value(Status::Failure).unwrap())
                         .expression_attribute_values(":status", to_attribute_value(status).unwrap())
                         .build().unwrap())
                     .build()]
@@ -208,7 +218,6 @@ impl WriteRequest {
                         .expression_attribute_names("#status", "status")
                         .expression_attribute_names("#updated_at", "updated_at")
                         .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
-                        //.expression_attribute_values(":null", AttributeValue::S("NULL".to_string()))
                         .expression_attribute_values(":retry_count", to_attribute_value(lock_node_exec_details.retry_count).unwrap())
                         .expression_attribute_values(":status", to_attribute_value(Status::Running).unwrap())
                         .expression_attribute_values(":queued", to_attribute_value(Status::Queued).unwrap())
@@ -220,8 +229,10 @@ impl WriteRequest {
                              .return_values_on_condition_check_failure(ReturnValuesOnConditionCheckFailure::AllOld)
                              .table_name(get_workflow_executions_table_name())
                              .set_key(Some(build_workflow_execution_key(workflow_id, execution_id)))
-                             .update_expression("SET #state_keys_by_node_id.#node_id = :state_id")
+                             .update_expression("SET #state_keys_by_node_id.#node_id = :state_id, #updated_at = :updated_at")
                              .expression_attribute_names("#state_keys_by_node_id", "state_keys_by_node_id")
+                             .expression_attribute_names("#updated_at", "updated_at")
+                             .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
                              .expression_attribute_names("#node_id", lock_node_exec_details.node_id.name.clone())
                              .expression_attribute_values(":state_id", to_attribute_value(lock_node_exec_details.state_id).unwrap())
                              .build()
@@ -246,13 +257,13 @@ impl WriteRequest {
             WriteRequest::UpdateNodeStatus(update_node_status_details) => {
                 vec![TransactWriteItem::builder()
                     .update(Update::builder()
+                        .return_values_on_condition_check_failure(ReturnValuesOnConditionCheckFailure::AllOld)
                         .table_name(get_node_executions_table_name())
                         .set_key(Some(build_node_state_key(workflow_id, execution_id, &update_node_status_details.state_id)))
                         .update_expression("SET #status = :status, #updated_at = :updated_at")
-                        .condition_expression("(#status != :status)")
                         .expression_attribute_names("#status", "status")
                         .expression_attribute_names("#updated_at", "updated_at")
-                        .expression_attribute_values("updated_at", to_attribute_value(now_i64()).unwrap())
+                        .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
                         .expression_attribute_values(":status", to_attribute_value(update_node_status_details.status).unwrap())
                         .build().unwrap())
                     .build()]
@@ -396,6 +407,7 @@ mod tests {
             workflow: workflow.clone(),
             authentication_providers: vec![],
             started_at: actual_exec.started_at,
+            update_at: None,
         };
         assert_eq!(expected, actual_exec);
 

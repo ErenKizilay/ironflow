@@ -8,7 +8,8 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LambdaConfig {
-    pub(crate) function_name: String,
+    pub function_name: String,
+    pub payload: DynamicValue
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -117,12 +118,6 @@ pub struct BranchBuilder {
     pub nodes: Vec<Node>,
 }
 
-pub struct GraphBuilder {
-    nodes_by_id: HashMap<NodeId, NodeConfig>,
-    node_ids: Vec<NodeId>,
-    pub id: String,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct  WorkflowConfiguration {
     pub auth_providers: Vec<String>,
@@ -145,55 +140,6 @@ impl WorkflowConfiguration {
             auth_providers: self.auth_providers.clone(),
             max_retry_count: self.max_retry_count.or(default.max_retry_count),
         }
-    }
-}
-
-impl BranchBuilder {
-    pub fn with(branch_name: String) -> BranchBuilder {
-        BranchBuilder {
-            name: branch_name,
-            condition: None,
-            nodes: vec![],
-        }
-    }
-
-    pub fn with_condition(branch_name: String, condition: Expression) -> BranchBuilder {
-        BranchBuilder {
-            name: branch_name,
-            condition: Some(condition),
-            nodes: vec![],
-        }
-    }
-
-    pub fn add_node(mut self, node: Node) -> BranchBuilder {
-        self.nodes.push(node);
-        self
-    }
-
-    fn build(&self) -> Branch {
-        Branch {
-            name: self.name.clone(),
-            condition: self.condition.clone(),
-            nodes: self.nodes.iter()
-                .map(|node| node.id.clone())
-                .collect(),
-        }
-    }
-}
-
-impl BranchNodeBuilder {
-    pub fn add(mut self, branch: BranchBuilder) -> BranchNodeBuilder {
-        self.branches.push(branch);
-        self
-    }
-
-    fn build(&self) -> NodeConfig {
-        let branches = self.branches.iter()
-            .map(|branch| branch.build())
-            .collect();
-        NodeConfig::BranchNode(BranchConfig {
-            branches,
-        })
     }
 }
 

@@ -1,22 +1,61 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use serde_dynamo::AttributeValue::S;
 use serde_json::Value;
+use crate::aws_lambda::client::{InvokeLambdaRequest, LambdaClient};
 use crate::execution::model::{Execution, Status, StepExecution, StepExecutionError, WorkflowExecution};
 use crate::http::http::{HttpClient, HttpRequest};
-use crate::model::{HttpConfig, StepTarget};
+use crate::model::{HttpConfig, LambdaConfig, StepTarget};
 
-pub async fn initiate_execution(http_client: Arc<HttpClient>, retry_count: usize, step_target: &StepTarget, workflow_execution: &WorkflowExecution, context: Value) -> (Status, Execution) {
+
+pub struct StepExecutor {
+    http_client: Arc<HttpClient>,
+    lambda_client: Arc<LambdaClient>,
+}
+
+impl StepExecutor {
+    pub async fn new() -> Arc<StepExecutor> {
+        Arc::new(Self {
+            http_client: HttpClient::new(),
+            lambda_client: LambdaClient::new().await,
+        })
+    }
+}
+
+
+pub async fn initiate_execution(step_executor: Arc<StepExecutor>, retry_count: usize, step_target: &StepTarget, workflow_execution: &WorkflowExecution, context: Value) -> (Status, Execution) {
     match step_target {
-        StepTarget::Lambda(lambda_config) => (
-            Status::Success,
-            Execution::Step(StepExecution {
-                retry_count: retry_count + 1,
-                result: Ok(Value::String("asddas".to_string())),
-            }),
-        ),
+        StepTarget::Lambda(lambda_config) => {
+            let lambda_client = step_executor.lambda_client.clone();
+            execute_lambda_step(retry_count, &context, lambda_config, lambda_client).await
+        }
         StepTarget::Http(http_config) => {
+            let http_client = step_executor.http_client.clone();
             execute_http_step(http_client, &context, http_config, retry_count, &workflow_execution)
                 .await
+        }
+    }
+}
+
+async fn execute_lambda_step(retry_count: usize, context: &Value, lambda_config: &LambdaConfig, lambda_client: Arc<LambdaClient>) -> (Status, Execution) {
+    let lambda_result = lambda_client.invoke(InvokeLambdaRequest::builder()
+        .function_name(lambda_config.function_name.clone())
+        .payload(lambda_config.payload.resolve(context.clone()))
+        .build())
+        .await;
+
+    match lambda_result {
+        Ok(response) => {
+            (Status::Success, Execution::Step(StepExecution {
+                retry_count: retry_count + 1,
+                result: Ok(response),
+            }))
+        }
+        Err(err) => {
+            (Status::Failure, Execution::Step(StepExecution {
+                retry_count: retry_count + 1,
+                result: Err(StepExecutionError::RunFailed(err)),
+            }))
         }
     }
 }

@@ -46,8 +46,15 @@ impl Engine {
                 let path = entry.path();
                 if path.is_file() {
                     if let Some(path_str) = path.to_str() {
-                        let workflow = from_yaml(path_str);
-                        self.workflows_by_id.insert(workflow.id.clone(), workflow);
+                        let workflow_result = from_yaml(path_str);
+                        match workflow_result {
+                            Ok(workflow) => {
+                                self.workflows_by_id.insert(workflow.id.clone(), workflow);
+                            }
+                            Err(err) => {
+                                panic!("Error loading workflow: {}", err);
+                            }
+                        }
                     }
                 }
             }
