@@ -1,13 +1,16 @@
 use crate::auth::http::AuthenticationProvider;
 use crate::expression::expression::{DynamicValue, Expression};
-use crate::model::NodeConfig::{AssertionNode, BranchNode};
-use crate::model::{AssertionConfig, AssertionItem, Branch, BranchConfig, ConditionConfig, EqualToComparison, Graph, HttpConfig, LambdaConfig, Node, NodeConfig, NodeId, WorkflowConfiguration};
-use serde::Deserialize;
+use crate::model::NodeConfig::{AssertionNode, BranchNode, LoopNode};
+use crate::model::{AssertionConfig, AssertionItem, Branch, BranchConfig, ConditionConfig, EqualToComparison, Graph, HttpConfig, HttpExecutionConfig, HttpRetryConfig, LambdaConfig, LoopConfig, Node, NodeConfig, NodeId, WorkflowConfiguration};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, Value};
 use serde_yaml::Value as YamlValue;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
+use bon::Builder;
+use clap::builder::Str;
+use serde_dynamo::AttributeValue::S;
 
 #[derive(Debug, Deserialize)]
 struct Workflow {
@@ -19,6 +22,7 @@ struct Workflow {
 #[derive(Debug, Deserialize, Clone)]
 enum NodeValue {
     Http(HttpDetails),
+    Loop(LoopDetails),
     Lambda(LambdaDetails),
     Condition(ConditionDetails),
     Branch(BranchDetails),
@@ -34,6 +38,41 @@ struct HttpDetails {
     pub headers: Option<HashMap<String, YamlValue>>,
     pub params: Option<HashMap<String, YamlValue>>,
     pub body: Option<YamlValue>,
+    pub config: Option<HttpConfigDetails>
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct LoopDetails {
+    pub id: String,
+    pub array: YamlValue,
+    pub for_each: String,
+    pub nodes: Vec<NodeValue>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpRetry {
+    pub enabled: Option<bool>,
+    pub max_count: Option<usize>,
+    pub on_methods: Option<Vec<String>>,
+    pub on_status_codes: Option<Vec<usize>>,
+}
+
+impl Default for HttpRetry {
+    fn default() -> Self {
+        let default_retry_config: HttpRetryConfig = Default::default();
+        Self {
+            enabled: Some(default_retry_config.enabled),
+            max_count: Some(default_retry_config.max_count),
+            on_methods: Some(default_retry_config.on_methods.clone()),
+            on_status_codes: Some(default_retry_config.on_status_codes.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpConfigDetails {
+    pub retry: HttpRetry,
+    pub fail_on_non_2xx: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -94,6 +133,7 @@ impl NodeValue {
             NodeValue::Branch(branch_details) => {NodeId::of(branch_details.id.clone())}
             NodeValue::Assertion(assertion_details) => {NodeId::of(assertion_details.id.clone())}
             NodeValue::Lambda(lambda_details) => {NodeId::of(lambda_details.id.clone())}
+            NodeValue::Loop(loop_details) => {NodeId::of(loop_details.id.clone())}
         }
     }
 }
@@ -134,6 +174,25 @@ fn traverse(node: NodeValue, configs: &mut Vec<Node>) {
                         None => {"application/json".to_string()}
                         Some(content_type) => {
                             content_type.to_string()
+                        }
+                    },
+                    execution: match &http.config {
+                        None => {
+                            Default::default()
+                        }
+                        Some(http_config_details) => {
+                            let provided_retry_config = &http_config_details.retry;
+                            let default_exec_config: HttpExecutionConfig = Default::default();
+                            let default_retry_config = default_exec_config.retry.clone();
+                            HttpExecutionConfig {
+                                retry: HttpRetryConfig {
+                                    enabled: provided_retry_config.enabled.unwrap_or(default_retry_config.enabled),
+                                    max_count: provided_retry_config.max_count.unwrap_or(default_retry_config.max_count),
+                                    on_methods: provided_retry_config.on_methods.clone().unwrap_or(default_retry_config.on_methods.clone()),
+                                    on_status_codes: provided_retry_config.on_status_codes.clone().unwrap_or(default_retry_config.on_status_codes.clone()),
+                                },
+                                fail_on_non_2xx: http_config_details.fail_on_non_2xx.unwrap_or(default_exec_config.fail_on_non_2xx),
+                            }
                         }
                     },
                 },
@@ -232,6 +291,18 @@ fn traverse(node: NodeValue, configs: &mut Vec<Node>) {
                         resolve_dynamic_from_yaml_value(body_val)
                     }
                 }}));
+        }
+        NodeValue::Loop(loop_details) => {
+            configs.push(Node::of(node.node_id(), LoopNode(LoopConfig{
+                array: resolve_dynamic_from_yaml_value(loop_details.array.clone()),
+                for_each: loop_details.for_each.clone(),
+                nodes: loop_details.nodes.iter()
+                    .map(|node|node.node_id())
+                    .collect(),
+            })));
+            loop_details.nodes.iter().for_each(|node| {
+                traverse(node.clone(), configs);
+            })
         }
     }
 }

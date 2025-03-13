@@ -12,33 +12,33 @@ nodes:
       description: "{{input.description}}"
   - !Http
     id: get_request
-    url: "{{join('', ['https://api.opsgenie.com/v2/alerts/requests/', create_alert.requestId])}}"
+    url: "{{join('', ['https://api.opsgenie.com/v2/alerts/requests/', create_alert.body.requestId])}}"
     method: GET
   - !Condition
     id: if_created
-    expression: "{{get_request.data.isSuccess}}"
+    expression: "{{get_request.body.data.isSuccess}}"
     true_branch:
       - !Http
         id: ack_alert
-        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/acknowledge'])}}"
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.body.data.alertId, '/acknowledge'])}}"
         method: POST
         body:
           note: "hebelek"
       - !Http
         id: close_alert
-        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/close'])}}"
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.body.data.alertId, '/close'])}}"
         method: POST
         body:
           note: "resolved"
       - !Http
         id: add_note_to_alert
-        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/notes'])}}"
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.body.data.alertId, '/notes'])}}"
         method: POST
         body:
           note: "a note from other side"
       - !Http
         id: add_tags_to_alert
-        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId, '/tags'])}}"
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.body.data.alertId, '/tags'])}}"
         method: POST
         body:
           tags:
@@ -46,27 +46,27 @@ nodes:
             - "{{add_note_to_alert.requestId}}"
       - !Http
         id: get_alert
-        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.data.alertId])}}"
+        url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.body.data.alertId])}}"
         method: GET
       - !Assertion
         id: assert_alert_fields
         assertions:
           - !Equals
-            left: "{{get_alert.data.message}}"
+            left: "{{get_alert.body.data.message}}"
             right: "{{input.message}}"
           - !Equals
-            left: "{{get_alert.data.description}}"
+            left: "{{get_alert.body.data.description}}"
             right: "{{input.description}}"
           - !Equals
-            left: "{{contains(get_alert.data.tags, 'hardcoded')}}"
+            left: "{{contains(get_alert.body.data.tags, 'hardcoded')}}"
             right: true
           - !Equals
-            left: "{{contains(get_alert.data.tags, add_note_to_alert.requestId)}}"
+            left: "{{contains(get_alert.body.data.tags, add_note_to_alert.body.requestId)}}"
             right: true
           - !Equals
-            left: "{{get_alert.data.acknowledged}}"
+            left: "{{get_alert.body.data.acknowledged}}"
             right: true
           - !Equals
-            left: "{{get_alert.data.status}}"
+            left: "{{get_alert.body.data.status}}"
             right: "closed"
 

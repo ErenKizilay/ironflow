@@ -20,7 +20,9 @@ pub enum DynamicValue {
 
 impl DynamicValue {
 
+    //todo solve double "" issue on string results
     pub fn resolve(&self, context: Value) -> Value {
+        println!("dynamic val: {:?}", self);
         match self {
             DynamicValue::Simple(expression) => {
                 expression.evaluate(context.clone())
@@ -137,6 +139,12 @@ fn to_json_value(rc: Rcvar) -> Value {
             Value::Null
         }
     }
+}
+
+pub fn value_as_string(value: Value) -> String {
+    value.as_str().unwrap().to_string()
+        .trim_matches('"')
+        .to_string()
 }
 
 #[cfg(test)]

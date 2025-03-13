@@ -1,6 +1,6 @@
-use crate::execution::model::{NodeExecutionState, Status, WorkflowExecution};
+use crate::execution::model::{NodeExecutionState, Status, WorkflowExecution, WorkflowExecutionError, WorkflowExecutionIdentifier};
 use crate::model::NodeId;
-use crate::persistence::model::{WorkflowExecutionIdentifier, WriteRequest, WriteWorkflowExecutionRequest};
+use crate::persistence::model::{WriteRequest, WriteWorkflowExecutionRequest};
 use aws_sdk_dynamodb::config::BehaviorVersion;
 use aws_sdk_dynamodb::primitives::DateTime;
 use aws_sdk_dynamodb::types::{AttributeValue, Get, Put, ReturnValuesOnConditionCheckFailure, TransactGetItem, TransactWriteItem, Update};
@@ -19,7 +19,9 @@ use reqwest::get;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_dynamo::aws_sdk_dynamodb_1::from_item;
+use serde_json::Value;
 use tracing::error;
+use tracing_subscriber::fmt::format;
 
 pub struct DynamoDbRepository {
     client: Arc<Client>,
@@ -133,12 +135,12 @@ impl WriteRequest {
                     input: initiate_workflow_exec_details.input,
                     index: 0,
                     status: Status::Queued,
-                    result: None,
                     state_keys_by_node_id: Default::default(),
+                    last_executed_node_id: None,
                     workflow: initiate_workflow_exec_details.workflow,
                     authentication_providers: initiate_workflow_exec_details.authentication_providers,
                     started_at: now_i64(),
-                    update_at: None,
+                    updated_at: None,
                 };
                 vec![TransactWriteItem::builder()
                     .put(Put::builder()
@@ -229,12 +231,14 @@ impl WriteRequest {
                              .return_values_on_condition_check_failure(ReturnValuesOnConditionCheckFailure::AllOld)
                              .table_name(get_workflow_executions_table_name())
                              .set_key(Some(build_workflow_execution_key(workflow_id, execution_id)))
-                             .update_expression("SET #state_keys_by_node_id.#node_id = :state_id, #updated_at = :updated_at")
+                             .update_expression("SET #state_keys_by_node_id.#node_id = :state_id, #last_executed_node_id = :last_executed_node_id, #updated_at = :updated_at")
                              .expression_attribute_names("#state_keys_by_node_id", "state_keys_by_node_id")
                              .expression_attribute_names("#updated_at", "updated_at")
-                             .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
+                             .expression_attribute_names("#last_executed_node_id", "last_executed_node_id")
                              .expression_attribute_names("#node_id", lock_node_exec_details.node_id.name.clone())
+                             .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
                              .expression_attribute_values(":state_id", to_attribute_value(lock_node_exec_details.state_id).unwrap())
+                             .expression_attribute_values(":last_executed_node_id", to_attribute_value(lock_node_exec_details.node_id).unwrap())
                              .build()
                              .unwrap())
                          .build()
@@ -299,6 +303,23 @@ impl WriteRequest {
                         .expression_attribute_names("#index", "index")
                         .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
                         .expression_attribute_values(":one", AttributeValue::N("1".to_string()))
+                        .build().unwrap())
+                    .build()]
+            }
+            WriteRequest::IncrementLoopIndex(increment_loop_index_details) => {
+                vec![TransactWriteItem::builder()
+                    .update(Update::builder()
+                        .table_name(get_node_executions_table_name())
+                        .set_key(Some(build_node_state_key(workflow_id, execution_id, &increment_loop_index_details.state_id)))
+                        .update_expression("SET #execution.#loop.#index = :next_index, #execution.#loop.#iteration_count = :iteration_count, #updated_at = :updated_at")
+                        .expression_attribute_names("#execution", "execution")
+                        .expression_attribute_names("#loop", "Loop")
+                        .expression_attribute_names("#updated_at", "updated_at")
+                        .expression_attribute_names("#index", "index")
+                        .expression_attribute_names("#iteration_count", "iteration_count")
+                        .expression_attribute_values(":updated_at", to_attribute_value(now_i64()).unwrap())
+                        .expression_attribute_values(":next_index", to_attribute_value(increment_loop_index_details.next_index).unwrap())
+                        .expression_attribute_values(":iteration_count", to_attribute_value(increment_loop_index_details.iteration_count).unwrap())
                         .build().unwrap())
                     .build()]
             }
@@ -402,12 +423,12 @@ mod tests {
             input: Value::String("an input".to_string()),
             index: 0,
             status: Status::Queued,
-            result: None,
             state_keys_by_node_id: Default::default(),
+            last_executed_node_id: None,
             workflow: workflow.clone(),
             authentication_providers: vec![],
             started_at: actual_exec.started_at,
-            update_at: None,
+            updated_at: None,
         };
         assert_eq!(expected, actual_exec);
 
@@ -501,6 +522,7 @@ mod tests {
             body: None,
             params: Default::default(),
             content_type: "application/json".to_string(),
+            execution: Default::default(),
         }));
         let http_post_node = StepNode(StepTarget::Http(HttpConfig {
             url: DynamicValue::Simple(Expression::of_str("https://abc.xyz")),
@@ -509,6 +531,7 @@ mod tests {
             body: Some(DynamicValue::Collection(vec![DynamicValue::Simple(Expression::of_str("asd.ads"))])),
             params: Default::default(),
             content_type: "application/json".to_string(),
+            execution: Default::default(),
         }));
         let condition_node = ConditionNode(ConditionConfig {
             expression: Expression::of_str("a.b.c"),

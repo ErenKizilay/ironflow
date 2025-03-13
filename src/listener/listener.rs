@@ -28,15 +28,14 @@ pub struct Message {
 }
 
 impl Listener {
-    pub async fn new(shutdown_receiver: watch::Receiver<bool>) -> Self {
+    pub async fn new(shutdown_receiver: watch::Receiver<bool>, repository: Arc<Repository>) -> Self {
         let (tx, mut rx) = mpsc::channel(32);
         let (message_deletion_tx, mut message_deletion_rx) = mpsc::channel(32);
         let sender: Mutex<Sender<Message>> = Mutex::new(tx);
         let receiver: Mutex<Receiver<Message>> = Mutex::new(rx);
-        let repository = Repository::of_dynamodb().await;
         Listener {
             shutdown_receiver,
-            workflow_executor: Arc::new(WorkflowExecutor::new(Arc::new(repository)).await),
+            workflow_executor: Arc::new(WorkflowExecutor::new(repository).await),
             receiver,
             message_deletion_sender: Arc::new(Mutex::new(message_deletion_tx)),
             task_tracker: TaskTracker::new(),

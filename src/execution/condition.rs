@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use serde_json::Value;
-use tracing::info;
-use crate::execution::execution::ContinueParentNodeExecutionCommand;
+use crate::execution::model::ContinueParentNodeExecutionCommand;
 use crate::execution::model::Execution::Condition;
 use crate::execution::model::{ConditionExecution, Execution, NodeExecutionState, Status};
 use crate::model::{ConditionConfig, NodeConfig};
 use crate::persistence::model::{IncrementConditionIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest};
 use crate::persistence::persistence::{InMemoryRepository, Repository};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::info;
 
 pub async fn initiate_execution(condition_config: &ConditionConfig, context: &Value) -> (Status, Execution) {
     let condition_result = condition_config.expression.evaluate(context.clone());
@@ -36,7 +36,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                 let child_nodes = if condition_exec.true_branch {
                     condition_config.true_branch.clone()
                 } else {
-                    condition_config.true_branch.clone()
+                    condition_config.false_branch.clone()
                 };
                 if condition_exec.index == child_nodes.len() {
                     tracing::info!("Condition Execution over!");

@@ -19,6 +19,13 @@ pub struct ConditionConfig {
     pub false_branch: Vec<NodeId>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct LoopConfig {
+    pub array: DynamicValue,
+    pub for_each: String,
+    pub nodes: Vec<NodeId>,
+}
+
 #[derive(Eq, Hash, PartialEq, Clone, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct NodeId {
@@ -39,6 +46,41 @@ pub struct HttpConfig {
     pub body: Option<DynamicValue>,
     pub params: HashMap<String, DynamicValue>,
     pub content_type: String,
+    pub execution: HttpExecutionConfig
+}
+
+#[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]
+pub struct HttpRetryConfig {
+    pub enabled: bool,
+    pub max_count: usize,
+    pub on_methods: Vec<String>,
+    pub on_status_codes: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]
+pub struct HttpExecutionConfig {
+    pub retry: HttpRetryConfig,
+    pub fail_on_non_2xx: bool,
+}
+
+impl Default for HttpRetryConfig {
+    fn default() -> Self {
+        HttpRetryConfig {
+            enabled: true,
+            max_count: 5,
+            on_methods: vec!["GET".to_string(), "HEAD".to_string(), "PUT".to_string(), "DELETE".to_string(), "OPTIONS".to_string(), "TRACE".to_string()],
+            on_status_codes: vec![], //429 and 408 status code will be retried automatically
+        }
+    }
+}
+
+impl Default for HttpExecutionConfig {
+    fn default() -> Self {
+        HttpExecutionConfig {
+            retry: Default::default(),
+            fail_on_non_2xx: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]
@@ -81,6 +123,7 @@ pub enum StepTarget {
 pub enum NodeConfig {
     StepNode(StepTarget),
     ConditionNode(ConditionConfig),
+    LoopNode(LoopConfig),
     BranchNode(BranchConfig),
     AssertionNode(AssertionConfig),
 }
@@ -97,25 +140,6 @@ pub struct Graph {
     pub node_ids: Vec<NodeId>,
     pub id: String,
     pub config: WorkflowConfiguration
-}
-
-#[derive(PartialEq, Debug, Serialize, Deserialize)]
-pub struct ConditionNodeBuilder {
-    node_id: NodeId,
-    expression: Expression,
-    true_branch: Vec<Node>,
-    false_branch: Vec<Node>,
-}
-
-pub struct BranchNodeBuilder {
-    node_id: NodeId,
-    branches: Vec<BranchBuilder>,
-}
-
-pub struct BranchBuilder {
-    pub name: String,
-    pub condition: Option<Expression>,
-    pub nodes: Vec<Node>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -143,35 +167,6 @@ impl WorkflowConfiguration {
     }
 }
 
-impl ConditionNodeBuilder {
-
-    pub fn if_true_then(mut self, node: Node) -> ConditionNodeBuilder {
-        self.true_branch.push(node);
-        self
-    }
-
-    pub fn if_false_then(mut self, node: Node) -> ConditionNodeBuilder {
-        self.false_branch.push(node);
-        self
-    }
-
-    fn build(&self) -> NodeConfig {
-        NodeConfig::ConditionNode(ConditionConfig {
-            expression: self.expression.clone(),
-            true_branch: self
-                .true_branch
-                .iter()
-                .map(|node| node.id.clone())
-                .collect(),
-            false_branch: self
-                .false_branch
-                .iter()
-                .map(|node| node.id.clone())
-                .collect(),
-        })
-    }
-}
-
 impl Node {
     pub(crate) fn lambda(id: NodeId, config: LambdaConfig) -> Node {
         Node {
@@ -189,22 +184,6 @@ impl Node {
 
     pub fn of(id: NodeId, config: NodeConfig) -> Node {
         Node { id, config }
-    }
-
-    pub fn condition(id: NodeId, expression: Expression) -> ConditionNodeBuilder {
-        ConditionNodeBuilder {
-            node_id: id,
-            expression,
-            true_branch: vec![],
-            false_branch: vec![],
-        }
-    }
-
-    pub fn branch(id: NodeId) -> BranchNodeBuilder {
-        BranchNodeBuilder {
-            node_id: id,
-            branches: vec![],
-        }
     }
 }
 
@@ -258,6 +237,9 @@ impl NodeConfig {
                     .iter()
                     .flat_map(|assertion|assertion.get_expressions())
                     .collect()
+            }
+            NodeConfig::LoopNode(loop_config) => {
+                loop_config.array.get_expressions()
             }
         }
     }

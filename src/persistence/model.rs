@@ -1,15 +1,10 @@
 use crate::auth::http::AuthenticationProvider;
-use crate::execution::model::{Execution, NodeExecutionState, Status, WorkflowExecutionError};
+use crate::execution::model::{Execution, NodeExecutionState, Status, WorkflowExecutionError, WorkflowExecutionIdentifier};
 use crate::model::{Graph, NodeId};
 use bon::Builder;
 use serde_json::Value;
 use std::collections::HashMap;
 use crate::persistence::dynamodb::repository::DynamoDbRepository;
-
-pub struct WorkflowExecutionIdentifier {
-    pub workflow_id: String,
-    pub execution_id: String,
-}
 
 pub enum PersistencePort {
     DynamoDb(DynamoDbRepository),
@@ -90,6 +85,7 @@ impl WriteWorkflowExecutionRequestBuilder {
     }
 }
 
+
 #[derive(Clone)]
 pub enum WriteRequest {
     InitiateWorkflowExecution(InitiateWorkflowExecDetails),
@@ -101,6 +97,7 @@ pub enum WriteRequest {
     UpdateNodeStatus(UpdateNodeStatusDetails),
     IncrementBranchIndex(IncrementBranchIndexDetails),
     IncrementConditionIndex(IncrementConditionIndexDetails),
+    IncrementLoopIndex(IncrementLoopIndexDetails),
 
 }
 
@@ -137,6 +134,14 @@ pub struct IncrementConditionIndexDetails {
     pub node_id: NodeId,
     pub state_id: String,
     pub current_index: usize
+}
+
+#[derive(Clone, Debug)]
+pub struct IncrementLoopIndexDetails {
+    pub node_id: NodeId,
+    pub state_id: String,
+    pub next_index: usize,
+    pub iteration_count: usize,
 }
 
 #[derive(Clone, Debug)]

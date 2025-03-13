@@ -1,4 +1,4 @@
-use crate::execution::execution::ContinueParentNodeExecutionCommand;
+use crate::execution::model::ContinueParentNodeExecutionCommand;
 use crate::execution::model::{BranchExecution, Execution, NodeExecutionState, Status};
 use crate::model::{Branch, BranchConfig, ConditionConfig, NodeId};
 use crate::persistence::model::{IncrementBranchIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest};

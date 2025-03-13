@@ -1,6 +1,11 @@
 use crate::auth::http::AuthenticationProvider;
+use crate::aws_lambda::client::LambdaClient;
+use crate::execution::context::build_context;
 use crate::execution::model::Execution::Condition;
-use crate::execution::model::{AssertionExecution, BranchExecution, ConditionExecution, Execution, NodeExecutionState, Status, StepExecution, StepExecutionError, WorkflowExecution, WorkflowExecutionError};
+use crate::execution::model::WorkflowExecutionError::AssertionFailed;
+use crate::execution::model::{AssertionExecution, BranchExecution, ConditionExecution, ContinueParentNodeExecutionCommand, Execution, NodeExecutionState, Status, StepExecution, StepExecutionError, WorkflowExecution, WorkflowExecutionError};
+use crate::execution::step::StepExecutor;
+use crate::execution::{assertion, branch, condition, loop_execution, step};
 use crate::http::http::{HttpClient, HttpRequest};
 use crate::model::{Branch, Graph, HttpConfig, NodeConfig, NodeId, StepTarget};
 use crate::persistence::model::{IncrementWorkflowIndexDetails, InitiateNodeExecDetails, InitiateWorkflowExecDetails, LockNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest, WriteWorkflowExecutionRequestBuilder};
@@ -15,9 +20,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio_util::task::TaskTracker;
-use crate::aws_lambda::client::LambdaClient;
-use crate::execution::{assertion, branch, condition, step};
-use crate::execution::step::StepExecutor;
 
 pub struct WorkflowExecutor {
     repository: Arc<Repository>,
@@ -103,6 +105,7 @@ impl WorkflowExecutor {
                 let node_execution_state = self.execute_node(&workflow_execution, state, node)
                     .await;
                 let node_status = &node_execution_state.status;
+                tracing::info!("Node[{}] executed with status: {:?}", state.node_id.name, node_status);
                 self.repository.port
                     .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                         .workflow_id(state.workflow_id.clone())
@@ -226,7 +229,9 @@ impl WorkflowExecutor {
                 Execution::Step(_) | Execution::Assertion(_) => {
                     unreachable!();
                 }
-                Execution::Loop(_) => {}
+                Execution::Loop(_) => {
+                    loop_execution::continue_execution(self.repository.clone(), continue_command).await;
+                }
                 Execution::Branch(_) => {
                     branch::continue_execution(self.repository.clone(), continue_command).await;
                 }
@@ -249,36 +254,7 @@ impl WorkflowExecutor {
         tracing::info!(
             "Executing node {:?} with depth {:?} wf index {:?}",
             node_id.name, depth, workflow_execution.index);
-        let state_keys_by_node_ids = &workflow_execution.state_keys_by_node_id;
-        let referred_node_ids: Vec<NodeId> = config
-            .get_expressions()
-            .iter()
-            .flat_map(|expr| expr.get_referred_nodes(state_keys_by_node_ids.clone()
-                .into_keys()
-                .collect()))
-            .collect();
-        tracing::debug!("referred_node_ids: {:?}", referred_node_ids);
-        let referred_state_ids: Vec<String> = referred_node_ids
-            .iter()
-            .map(|node_id| state_keys_by_node_ids.get(node_id))
-            .filter(|key| key.is_some())
-            .map(|key| key.unwrap().clone())
-            .collect();
-        let referred_node_states = self.repository.port
-            .get_node_executions(
-                &workflow.id.clone(),
-                &workflow_execution.execution_id,
-                referred_state_ids,
-            )
-            .await;
-
-        let mut context: Map<String, Value> = referred_node_states
-            .iter()
-            .filter(|state| state.execution.is_some())
-            .map(|state| (state.node_id.clone().name, state.get_context()))
-            .collect();
-        context.insert("input".to_string(), workflow_execution.input.clone());
-        let final_context = Object(context);
+        let final_context = build_context(self.repository.clone(), workflow_execution, config, state).await;
         let retry_count = resolve_retry_count(state);
         let (status, execution) = match config {
             NodeConfig::StepNode(step_target) => {
@@ -293,6 +269,9 @@ impl WorkflowExecutor {
             }
             NodeConfig::AssertionNode(assertion_config) => {
                 assertion::initiate_execution(assertion_config, final_context).await
+            }
+            NodeConfig::LoopNode(loop_config) => {
+                loop_execution::initiate_execution(loop_config, &final_context).await
             }
         };
         NodeExecutionState {
@@ -322,10 +301,3 @@ fn resolve_retry_count(state: &NodeExecutionState) -> usize {
     retry_count
 }
 
-//if child_state is empty then parent node execution triggerred by itself meaning that it is just started
-#[derive(Builder)]
-pub(crate) struct ContinueParentNodeExecutionCommand {
-    pub(crate) workflow_execution: WorkflowExecution,
-    pub(crate) parent_state: NodeExecutionState,
-    pub(crate) child_state: Option<NodeExecutionState>,
-}

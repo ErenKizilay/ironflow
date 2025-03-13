@@ -1,0 +1,24 @@
+name: opsgenie_loop
+config:
+  auth_providers:
+    - opsgenie
+nodes:
+  - !Http
+    id: list_teams
+    url: https://api.opsgenie.com/v2/teams
+    method: GET
+    headers:
+      Authorization: "GenieKey c844f851-cb35-440a-8763-ffb28e74db4d"
+  - !Loop
+    id: iterate_teams
+    for_each: team
+    array: "{{list_teams.body.data}}"
+    nodes:
+      - !Http
+        id: create_alert
+        url: https://api.opsgenie.com/v2/alerts
+        method: POST
+        body:
+          message: "{{join(' for', [input.message, team.id])}}"
+          description: "{{input.description}}"
+

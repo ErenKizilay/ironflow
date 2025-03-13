@@ -1,6 +1,6 @@
-use serde_json::Value;
 use crate::execution::model::{AssertionExecution, Execution, Status};
-use crate::model::{AssertionConfig, BranchConfig};
+use crate::model::AssertionConfig;
+use serde_json::Value;
 
 pub async fn initiate_execution(assertion_config: &AssertionConfig, context: Value) -> (Status, Execution) {
     let errors: Vec<Option<String>> = assertion_config.assertions
