@@ -15,11 +15,11 @@ nodes:
       {{ { "fields": input, "id": get_uuid.uuid } }}
   - !Condition
     id: if_a_condition
-    expression: "{{create_todo.json.fields.aBool)}}"
+    expression: "{{create_todo.body.json.fields.aBool)}}"
     true_branch:
       - !Http
         id: update_todo
-        url: "{{join('', ['https://httpbin.org/anything/todos/', create_todo.json.id])}}"
+        url: "{{join('', ['https://httpbin.org/anything/todos/', create_todo.body.json.id])}}"
         method: PATCH
         body: |
           {{
@@ -30,7 +30,7 @@ nodes:
     false_branch:
       - !Http
         id: put_todo
-        url: "{{join('', ['https://httpbin.org/anything/todos/', create_todo.json.id])}}"
+        url: "{{join('', ['https://httpbin.org/anything/todos/', create_todo.body.json.id])}}"
         method: PUT
         body: "{{input}}"
   - !Branch
@@ -39,14 +39,14 @@ nodes:
       case_1:
         - !Http
           id: delete_todo
-          url: "{{join('', ['https://httpbin.org/anything/todos/', create_todo.json.id])}}"
+          url: "{{join('', ['https://httpbin.org/anything/todos/', create_todo.body.json.id])}}"
           method: DELETE
   - !Assertion
     id: assert_data
     assertions:
       - !Equals
-        left: "{{create_todo.json.message}}"
+        left: "{{create_todo.body.json.message}}"
         right: "{{create_todo.json.message}}"
       - !NotEquals
-        left: "{{create_todo.json.x}}"
-        right: "{{create_todo.json.y}}"
+        left: "{{create_todo.body.json.x}}"
+        right: "{{create_todo.body.json.y}}"

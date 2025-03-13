@@ -1,1 +1,1 @@
-mod repository;
+pub mod repository;

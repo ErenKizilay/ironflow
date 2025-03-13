@@ -1,37 +1,46 @@
+use crate::api::routes::{build_routes, AppState};
 use crate::auth::http::AuthenticationProvider;
 use crate::execution::execution::WorkflowExecutor;
+use crate::listener::listener::Listener;
 use crate::model::Graph;
-use crate::persistence::persistence::Repository;
+use crate::persistence::persistence::{InMemoryRepository, Repository};
 use crate::yaml::yaml::{from_yaml, from_yaml_to_auth};
+use axum::extract::DefaultBodyLimit;
+use axum::Router;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::signal;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 use tokio_util::task::TaskTracker;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tower_http::LatencyUnit;
+use tracing::Level;
 
+#[derive(Clone)]
 pub struct Engine {
-    repository: Arc<Repository>,
-    workflow_executor: Arc<WorkflowExecutor>,
     workflows_by_id: HashMap<String, Graph>,
     auth_providers: Vec<AuthenticationProvider>,
+    listener: Arc<Listener>,
     task_tracker: TaskTracker,
+    shutdown_tx: watch::Sender<bool>,
+    pub(crate) repository: Arc<Repository>
 }
 
 impl Engine {
-    pub fn new() -> Self {
-        let (tx, mut rx) = mpsc::channel(32);
-        let repository = Repository::new(tx);
+    pub async fn new() -> Self {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false); // Watch channel for shutdown signal
+        let repository = Arc::new(Repository::of_dynamodb().await);
         Engine {
-            repository: repository.clone(),
-            workflow_executor: Arc::new(WorkflowExecutor::new(
-                repository,
-                Arc::new(Mutex::new(rx)),
-            )),
+            listener: Arc::new(Listener::new(shutdown_rx, repository.clone()).await),
             workflows_by_id: Default::default(),
             auth_providers: vec![],
             task_tracker: TaskTracker::new(),
+            shutdown_tx,
+            repository: repository.clone(),
         }
     }
 
@@ -48,12 +57,15 @@ impl Engine {
                 let path = entry.path();
                 if path.is_file() {
                     if let Some(path_str) = path.to_str() {
-                        let workflow = from_yaml(path_str);
-                        self.repository
-                            .save_workflow(workflow.clone())
-                            .await
-                            .unwrap();
-                        self.workflows_by_id.insert(workflow.id.clone(), workflow);
+                        let workflow_result = from_yaml(path_str);
+                        match workflow_result {
+                            Ok(workflow) => {
+                                self.workflows_by_id.insert(workflow.id.clone(), workflow);
+                            }
+                            Err(err) => {
+                                panic!("Error loading workflow: {}", err);
+                            }
+                        }
                     }
                 }
             }
@@ -61,30 +73,21 @@ impl Engine {
         self
     }
 
-    pub async fn start(&self) {
+    pub async fn start(self) {
+        let engine = Arc::new(self);
         tracing::info!("Starting Engine");
-        let arc = self.workflow_executor.clone();
-        self.task_tracker.spawn(async move {
-            arc.listen().await;
+        let listener = engine.listener.clone();
+        let engine_cloned = engine.clone();
+        engine.task_tracker.spawn(async move {
+            listener.start().await;
         });
         tracing::info!("Engine started");
-    }
-
-    pub async fn stop(self) {
-        match signal::ctrl_c().await {
-            Ok(_) => {
-                tracing::info!("Shutting down Engine");
-                drop(self.repository);
-                self.workflow_executor.stop().await;
-                drop(self.workflow_executor);
-                self.task_tracker.close();
-                self.task_tracker.wait().await;
-                tracing::info!("Engine stopped");
-            }
-            Err(_) => {
-                tracing::error!("Failed to install CTRL-C handler");
-            }
-        }
+        engine.task_tracker.spawn(async move {
+            engine_cloned.run_api().await;
+        });
+        signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
+        tracing::info!("received ctrl-c, shutting down");
+        engine.shutdown_tx.send(true).unwrap();
     }
 
     pub async fn run_workflow(&self, workflow_id: String, execution_id: String, input: Value) {
@@ -95,8 +98,14 @@ impl Engine {
             .cloned()
             .collect::<Vec<AuthenticationProvider>>();
         tracing::info!("Will run workflow: {}", workflow.id);
-        self.workflow_executor
-            .start(workflow.clone(), execution_id, input, auth_providers)
-            .await;
+        self.listener.run_workflow(execution_id, workflow.clone(), auth_providers, input).await;
+    }
+
+    async fn run_api(self: Arc<Self>) {
+        let routes = build_routes(AppState {
+            engine: self,
+        }).await;
+        let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+        axum::serve(listener, routes).await.unwrap();
     }
 }

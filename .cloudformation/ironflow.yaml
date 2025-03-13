@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFormation template for IronFlow resources"
+
+Resources:
+  IronFlowWorkflowExecutions:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ironflow_workflow_executions
+      AttributeDefinitions:
+        - AttributeName: workflow_id#execution_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: workflow_id#execution_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: source
+          Value: ironflow
+
+  IronFlowNodeExecutions:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ironflow_node_executions
+      AttributeDefinitions:
+        - AttributeName: workflow_id#execution_id
+          AttributeType: S
+        - AttributeName: state_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: workflow_id#execution_id
+          KeyType: HASH
+        - AttributeName: state_id
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: source
+          Value: ironflow
+
+  IronFlowNodeExecutionsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ironflow_node_executions
+      Tags:
+        - Key: source
+          Value: ironflow
+
+  IronFlowEngineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ironflow_engine_execution_role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: IronFlowEnginePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/source: ironflow
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/source: ironflow
+      Tags:
+        - Key: source
+          Value: ironflow
+
+  IronFlowDynamoDBStreamsLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ironflow_dynamodb_streams_lambda_execution_role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: IronFlowDynamoDBStreamsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/source: ironflow
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/source: ironflow
+      Tags:
+        - Key: source
+          Value: ironflow

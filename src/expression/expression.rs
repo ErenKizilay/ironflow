@@ -20,6 +20,7 @@ pub enum DynamicValue {
 
 impl DynamicValue {
 
+    //todo solve double "" issue on string results
     pub fn resolve(&self, context: Value) -> Value {
         match self {
             DynamicValue::Simple(expression) => {
@@ -82,9 +83,17 @@ impl Expression {
                         let evaluation_result = Variable::from_json(context_json.as_str());
                         match evaluation_result {
                             Ok(data) => {
-                                let result = expr.search(data).unwrap();
-                                let json_value = to_json_value(result);
-                                json_value
+                                let result = expr.search(data);
+                                match result {
+                                    Ok(search_result) => {
+                                        let json_value = to_json_value(search_result);
+                                        json_value
+                                    }
+                                    Err(err) => {
+                                        tracing::warn!("search error[{:?}] occurred. expr: {:?} context: {:?}", err, expr, context);
+                                        Value::Null
+                                    }
+                                }
                             },
                             Err(err) => {
                                 tracing::warn!("evaluation error[{:?}] occurred. expr: {:?} context: {:?}", err, expr, context);
@@ -129,6 +138,12 @@ fn to_json_value(rc: Rcvar) -> Value {
             Value::Null
         }
     }
+}
+
+pub fn value_as_string(value: Value) -> String {
+    value.as_str().unwrap().to_string()
+        .trim_matches('"')
+        .to_string()
 }
 
 #[cfg(test)]
