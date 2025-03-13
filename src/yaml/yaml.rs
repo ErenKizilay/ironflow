@@ -54,7 +54,7 @@ pub struct HttpRetry {
     pub enabled: Option<bool>,
     pub max_count: Option<usize>,
     pub on_methods: Option<Vec<String>>,
-    pub on_status_codes: Option<Vec<usize>>,
+    pub on_status_codes: Option<Vec<u16>>,
 }
 
 impl Default for HttpRetry {

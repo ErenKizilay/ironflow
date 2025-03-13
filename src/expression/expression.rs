@@ -22,7 +22,6 @@ impl DynamicValue {
 
     //todo solve double "" issue on string results
     pub fn resolve(&self, context: Value) -> Value {
-        println!("dynamic val: {:?}", self);
         match self {
             DynamicValue::Simple(expression) => {
                 expression.evaluate(context.clone())

@@ -43,7 +43,7 @@ nodes:
         body:
           tags:
             - "hardcoded"
-            - "{{add_note_to_alert.requestId}}"
+            - "{{add_note_to_alert.body.requestId}}"
       - !Http
         id: get_alert
         url: "{{join('', ['https://api.opsgenie.com/v2/alerts/', get_request.body.data.alertId])}}"

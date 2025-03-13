@@ -85,10 +85,6 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                             .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                                 .workflow_id(workflow.id.clone())
                                 .execution_id(workflow_execution.execution_id.clone())
-                                .write(WriteRequest::IncrementWorkflowIndex(IncrementWorkflowIndexDetails {
-                                    increment: parent_state.depth.is_empty(),
-                                    current_index: workflow_execution.index,
-                                }))
                                 .write(WriteRequest::UpdateNodeStatus(UpdateNodeStatusDetails {
                                     node_id: parent_state.node_id.clone(),
                                     state_id: parent_state_id.clone(),

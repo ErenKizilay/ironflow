@@ -69,23 +69,9 @@ impl WorkflowExecutor {
         let execution = &state.execution;
         let depth = &state.depth;
 
-        let all_nodes_are_visited = workflow_execution.index >= graph.node_ids.len();
-        let workflow_completed = workflow_execution.status.is_complete();
-        if all_nodes_are_visited || workflow_completed {
-            tracing::info!("Workflow[{}] execution over!", graph.id);
-            if !workflow_completed {
-                self.repository.port
-                    .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
-                        .workflow_id(state.workflow_id.clone())
-                        .execution_id(state.execution_id.clone())
-                        .write(WriteRequest::UpdateWorkflowStatus(Status::Success))
-                        .build()).await;
-            }
-            return Ok(());
-        }
         tracing::info!("Node[{}] execution status: {:?}", state.node_id.name, status);
         match status {
-            Status::Queued => {
+            Status::Queued | Status::WillRetried => {
                 let state_id = state.state_id.clone();
                 let retry_count = resolve_retry_count(state);
                 self.repository.port
@@ -98,9 +84,6 @@ impl WorkflowExecutor {
                             retry_count,
                         }))
                         .build()).await;
-                if retry_count > 1 {
-                    tracing::warn!("Retrying node[{:?}] execution...", state.node_id.name);
-                }
                 let node = graph.nodes_by_id.get(&state.node_id).unwrap();
                 let node_execution_state = self.execute_node(&workflow_execution, state, node)
                     .await;
@@ -111,30 +94,41 @@ impl WorkflowExecutor {
                         .workflow_id(state.workflow_id.clone())
                         .execution_id(state.execution_id.clone())
                         .write(WriteRequest::SaveNodeExec(node_execution_state.clone()))
-                        .write(WriteRequest::IncrementWorkflowIndex(IncrementWorkflowIndexDetails{
-                            increment: depth.is_empty() && Status::Success.eq(node_status),
-                            current_index: workflow_execution.index,
-                        }))
                         .build()).await;
             }
             Status::Success => {
                 if depth.is_empty() {
-                    let next_node_id = &graph.node_ids
-                        .get(workflow_execution.index)
-                        .unwrap()
-                        .clone();
-                    tracing::info!("Will queue: {:?}", next_node_id.clone().name);
-                    let state_id = next_node_id.clone().name;
-                    self.repository.port
-                        .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
-                            .workflow_id(state.workflow_id.clone())
-                            .execution_id(state.execution_id.clone())
-                            .write(WriteRequest::InitiateNodeExec(InitiateNodeExecDetails {
-                                node_id: next_node_id.clone(),
-                                state_id,
-                                dept: vec![],
-                            }))
-                            .build()).await;
+                    let next_index = workflow_execution.index + 1;
+                    if next_index < graph.node_ids.len() {
+                        let next_node_id = &graph.node_ids
+                            .get(next_index)
+                            .unwrap()
+                            .clone();
+                        tracing::info!("Will queue: {:?}", next_node_id.clone().name);
+                        let state_id = next_node_id.clone().name;
+                        self.repository.port
+                            .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                                .workflow_id(state.workflow_id.clone())
+                                .execution_id(state.execution_id.clone())
+                                .write(WriteRequest::IncrementWorkflowIndex(IncrementWorkflowIndexDetails {
+                                    increment: true,
+                                    current_index: workflow_execution.index,
+                                }))
+                                .write(WriteRequest::InitiateNodeExec(InitiateNodeExecDetails {
+                                    node_id: next_node_id.clone(),
+                                    state_id,
+                                    dept: vec![],
+                                }))
+                                .build()).await;
+                    } else {
+                        self.repository.port
+                            .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                                .workflow_id(state.workflow_id.clone())
+                                .execution_id(state.execution_id.clone())
+                                .write(WriteRequest::UpdateWorkflowStatus(Status::Success))
+                                .build()).await;
+                        tracing::info!("Workflow[{}] executed successfully", graph.id);
+                    }
                 } else {
                     self.continue_parent_node_exec(&workflow_execution, state, true)
                         .await;
@@ -152,37 +146,13 @@ impl WorkflowExecutor {
                 }
             },
             Status::Failure => {
-                if let Some(execution) = execution {
-                    match execution {
-                        Execution::Step(step_exec) => {
-                            let retry_count = resolve_retry_count(state);
-                            let max_retry_count = graph.config.max_retry_count.unwrap();
-                            let new_status = if retry_count > max_retry_count { Status::Failure } else { Status::InProgress };
-                            self.repository.port
-                                .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
-                                    .workflow_id(state.workflow_id.clone())
-                                    .execution_id(state.execution_id.clone())
-                                    .write(WriteRequest::UpdateWorkflowStatus(new_status))
-                                    .write(WriteRequest::UpdateNodeStatus(UpdateNodeStatusDetails {
-                                        node_id: state.node_id.clone(),
-                                        state_id: state.state_id.clone(),
-                                        status: if retry_count > max_retry_count { Status::Failure } else { Status::Queued },
-                                    }))
-                                    .build()).await;
-                        }
-                        Execution::Loop(_) => {}
-                        Execution::Branch(_) => {}
-                        Condition(_) => {}
-                        Execution::Assertion(assertion_exec) => {
-                            self.repository.port
-                                .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
-                                    .workflow_id(state.workflow_id.clone())
-                                    .execution_id(state.execution_id.clone())
-                                    .write(WriteRequest::UpdateWorkflowStatus(Status::Failure))
-                                    .build()).await;
-                        }
-                    }
-                }
+                self.repository.port
+                    .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                        .workflow_id(state.workflow_id.clone())
+                        .execution_id(state.execution_id.clone())
+                        .write(WriteRequest::UpdateWorkflowStatus(Status::Failure))
+                        .build()).await;
+                tracing::info!("Workflow[{}] execution failed", graph.id);
             }
             Status::Running => {
                 tracing::debug!("Running node: {:?}", state.node_id.name);

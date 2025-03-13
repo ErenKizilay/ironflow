@@ -91,15 +91,31 @@ async fn execute_http_step(
                     }),
                 )
             } else {
-                (
-                    Status::Failure,
-                    Execution::Step(StepExecution {
-                        retry_count: attempt_number,
-                        result: Err(StepExecutionError::RunFailed(
-                            Value::Object(response_context),
-                        )),
-                    }),
-                )
+                let retry_config = &http_config.execution.retry;
+                if retry_config.enabled &&
+                    retry_count < retry_config.max_count + 1 &&
+                    retry_config.on_status_codes.contains(&status_code.as_u16()) &&
+                    retry_config.on_methods.contains(&http_config.method)  {
+                    (
+                        Status::WillRetried,
+                        Execution::Step(StepExecution {
+                            retry_count: attempt_number,
+                            result: Err(StepExecutionError::RunFailed(
+                                Value::Object(response_context),
+                            )),
+                        }),
+                    )
+                } else {
+                    (
+                        Status::Failure,
+                        Execution::Step(StepExecution {
+                            retry_count: attempt_number,
+                            result: Err(StepExecutionError::RunFailed(
+                                Value::Object(response_context),
+                            )),
+                        }),
+                    )
+                }
             }
         }
         Err(http_error) => {

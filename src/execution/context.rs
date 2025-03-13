@@ -12,7 +12,6 @@ async fn load_env_variables() -> Value {
         .for_each(|(name, value)| {
             variables.insert(name, Value::String(value));
         });
-    println!("variables: {:?}", variables);
     Value::Object(variables)
 }
 
@@ -59,8 +58,6 @@ pub async fn build_context(repository: Arc<Repository>, workflow_execution: &Wor
                 .unwrap();
             if let Execution::Loop(loop_exec) = loop_state.execution.unwrap() {
                 context.insert(loop_config.for_each.clone(), loop_exec.get_item());
-                println!("context: {:?}", context);
-                println!("context: {:?}", loop_exec.get_item());
             }
         }
     }

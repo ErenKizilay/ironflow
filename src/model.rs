@@ -46,7 +46,7 @@ pub struct HttpConfig {
     pub body: Option<DynamicValue>,
     pub params: HashMap<String, DynamicValue>,
     pub content_type: String,
-    pub execution: HttpExecutionConfig
+    pub execution: HttpExecutionConfig,
 }
 
 #[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ pub struct HttpRetryConfig {
     pub enabled: bool,
     pub max_count: usize,
     pub on_methods: Vec<String>,
-    pub on_status_codes: Vec<usize>,
+    pub on_status_codes: Vec<u16>,
 }
 
 #[derive(Clone, Debug, Builder, PartialEq, Serialize, Deserialize)]

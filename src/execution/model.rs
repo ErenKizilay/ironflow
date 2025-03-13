@@ -108,6 +108,7 @@ pub struct BranchExecution {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Status {
     Queued,
+    WillRetried,
     Running,
     Success,
     InProgress,
