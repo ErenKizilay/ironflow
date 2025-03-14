@@ -19,6 +19,6 @@ nodes:
         url: https://api.opsgenie.com/v2/alerts
         method: POST
         body:
-          message: "{{join(' for', [input.message, team.id])}}"
+          message: "{{join(' for ', [input.message, team.id])}}"
           description: "{{input.description}}"
 

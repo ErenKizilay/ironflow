@@ -1,16 +1,13 @@
-use crate::auth::http::AuthenticationProvider;
+use crate::auth::http::HttpAuthentication;
 use crate::expression::expression::{DynamicValue, Expression};
-use crate::model::NodeConfig::{AssertionNode, BranchNode, LoopNode};
-use crate::model::{AssertionConfig, AssertionItem, Branch, BranchConfig, ConditionConfig, EqualToComparison, Graph, HttpConfig, HttpExecutionConfig, HttpRetryConfig, LambdaConfig, LoopConfig, Node, NodeConfig, NodeId, WorkflowConfiguration};
+use crate::model::NodeConfig::{AssertionNode, BranchNode, LoopNode, WorkflowNode};
+use crate::model::{AssertionConfig, AssertionItem, Branch, BranchConfig, ConditionConfig, EqualToComparison, Graph, HttpConfig, HttpExecutionConfig, HttpRetryConfig, LambdaConfig, LoopConfig, Node, NodeConfig, NodeId, WorkflowConfiguration, WorkflowNodeConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, Value};
 use serde_yaml::Value as YamlValue;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
-use bon::Builder;
-use clap::builder::Str;
-use serde_dynamo::AttributeValue::S;
 
 #[derive(Debug, Deserialize)]
 struct Workflow {
@@ -27,6 +24,7 @@ enum NodeValue {
     Condition(ConditionDetails),
     Branch(BranchDetails),
     Assertion(AssertionDetails),
+    Workflow(WorkflowNodeDetails),
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -103,6 +101,14 @@ struct BranchDetails {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct WorkflowNodeDetails {
+    pub id: String,
+    pub workflow: YamlValue,
+    pub execution_id: Option<YamlValue>,
+    pub input: YamlValue,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 enum AssertionDetail {
     Equals(EqualityCheck),
     NotEquals(EqualityCheck),
@@ -122,7 +128,7 @@ struct AssertionDetails {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AuthProviderDetails {
-    pub providers: Vec<AuthenticationProvider>
+    pub providers: Vec<HttpAuthentication>
 }
 
 impl NodeValue {
@@ -134,6 +140,7 @@ impl NodeValue {
             NodeValue::Assertion(assertion_details) => {NodeId::of(assertion_details.id.clone())}
             NodeValue::Lambda(lambda_details) => {NodeId::of(lambda_details.id.clone())}
             NodeValue::Loop(loop_details) => {NodeId::of(loop_details.id.clone())}
+            NodeValue::Workflow(workflow_details) => {NodeId::of(workflow_details.id.clone())}
         }
     }
 }
@@ -302,7 +309,14 @@ fn traverse(node: NodeValue, configs: &mut Vec<Node>) {
             })));
             loop_details.nodes.iter().for_each(|node| {
                 traverse(node.clone(), configs);
-            })
+            });
+        }
+        NodeValue::Workflow(workflow_node_details) => {
+            configs.push(Node::of(node.node_id(), WorkflowNode(WorkflowNodeConfig {
+                workflow_id: resolve_dynamic_from_yaml_value(workflow_node_details.workflow.clone()),
+                execution_id: workflow_node_details.clone().execution_id.map(|exec_id|resolve_dynamic_from_yaml_value(exec_id)),
+                input: resolve_dynamic_from_yaml_value(workflow_node_details.input.clone()),
+            })));
         }
     }
 }
@@ -347,7 +361,6 @@ pub fn from_yaml(file_name: &str) -> Result<Graph, String> {
             }
         },
     };
-    tracing::info!("Graph: {:?}", graph);
     Ok(graph)
 }
 
@@ -408,7 +421,7 @@ fn resolve_dynamic_json_value(json_value: JsonValue) -> DynamicValue {
 }
 #[cfg(test)]
 mod tests {
-    use crate::yaml::yaml::{from_yaml};
+    use crate::yaml::yaml::from_yaml;
     #[test]
     fn test_from_yaml() {
         from_yaml("resources/workflows/workflow.yaml").unwrap();

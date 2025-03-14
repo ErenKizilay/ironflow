@@ -25,7 +25,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
     let parent_state = command.parent_state;
     let workflow = workflow_execution.workflow.clone();
     let parent_node = workflow.get_node(&parent_state.node_id).unwrap();
-    let parent_state_id = workflow_execution.get_state_id_of_node(&parent_state.node_id);
+    let parent_state_id = workflow_execution.state_id_of_node(&parent_state.node_id);
     match parent_node {
         NodeConfig::ConditionNode(condition_config) => {
             if let Some(Condition(ref condition_exec)) = parent_state.execution {

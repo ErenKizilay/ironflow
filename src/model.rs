@@ -126,6 +126,7 @@ pub enum NodeConfig {
     LoopNode(LoopConfig),
     BranchNode(BranchConfig),
     AssertionNode(AssertionConfig),
+    WorkflowNode(WorkflowNodeConfig)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -142,11 +143,19 @@ pub struct Graph {
     pub config: WorkflowConfiguration
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WorkflowNodeConfig {
+    pub workflow_id: DynamicValue,
+    pub execution_id: Option<DynamicValue>,
+    pub input: DynamicValue
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct  WorkflowConfiguration {
     pub auth_providers: Vec<String>,
     pub max_retry_count: Option<usize>,
 }
+
 impl Default for WorkflowConfiguration {
     fn default() -> Self {
         WorkflowConfiguration {
@@ -240,6 +249,14 @@ impl NodeConfig {
             }
             NodeConfig::LoopNode(loop_config) => {
                 loop_config.array.get_expressions()
+            }
+            NodeConfig::WorkflowNode(workflow_node_config) => {
+                let mut workflow_expressions = vec![];
+                workflow_expressions.extend(workflow_node_config.input.get_expressions());
+                workflow_expressions.extend(workflow_node_config.workflow_id.get_expressions());
+                let execution_id = workflow_node_config.execution_id.clone();
+                workflow_expressions.extend(execution_id.map_or_else(Vec::new, |dv|dv.get_expressions()));
+                workflow_expressions
             }
         }
     }

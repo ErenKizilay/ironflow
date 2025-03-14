@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashMap};
 use crate::model::NodeId;
-use jmespath::{ Rcvar, Variable};
+use jmespath::{Rcvar, Variable};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -148,12 +148,10 @@ pub fn value_as_string(value: Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use jmespath::{compile, Variable};
     use crate::expression::expression::{DynamicValue, Expression};
     use crate::model::NodeId;
-    use serde_json::{json, Map};
-    use serde_yaml::Value;
+    use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn test_to_json_value() {

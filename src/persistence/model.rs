@@ -1,10 +1,9 @@
-use crate::auth::http::AuthenticationProvider;
-use crate::execution::model::{Execution, NodeExecutionState, Status, WorkflowExecutionError, WorkflowExecutionIdentifier};
+use crate::execution::model::{Execution, ExecutionSource, NodeExecutionState, Status, WorkflowExecutionError, WorkflowExecutionIdentifier};
 use crate::model::{Graph, NodeId};
+use crate::persistence::dynamodb::repository::DynamoDbRepository;
 use bon::Builder;
 use serde_json::Value;
 use std::collections::HashMap;
-use crate::persistence::dynamodb::repository::DynamoDbRepository;
 
 pub enum PersistencePort {
     DynamoDb(DynamoDbRepository),
@@ -154,6 +153,7 @@ pub struct InitiateNodeExecDetails {
 #[derive(Clone, Debug)]
 pub struct InitiateWorkflowExecDetails {
     pub input: Value,
-    pub authentication_providers: Vec<AuthenticationProvider>,
     pub workflow: Graph,
+    pub source: ExecutionSource,
+    pub depth: Vec<WorkflowExecutionIdentifier>
 }

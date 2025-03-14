@@ -1,26 +1,28 @@
 use crate::execution::model::NodeExecutionState;
+use crate::listener::listener::Message;
 use aws_config::BehaviorVersion;
-use aws_sdk_sqs::Client;
-use std::sync::Arc;
-use std::time::Duration;
 use aws_sdk_dynamodb::config::http::HttpResponse;
 use aws_sdk_sqs::operation::delete_message::{DeleteMessageError, DeleteMessageOutput};
 use aws_sdk_sqs::operation::receive_message::{ReceiveMessageError, ReceiveMessageOutput};
+use aws_sdk_sqs::Client;
 use serde_dynamo::{from_item, Item};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tracing::trace;
-use crate::listener::listener::Message;
+use crate::config::configuration::ListenerConfig;
 
 pub struct SqsPoller {
     message_channel: Mutex<Sender<Message>>,
     message_deletion_receiver: Mutex<Receiver<String>>,
     sqs_client: Arc<Client>,
     queue_url: String,
+    listener_config: ListenerConfig
 }
 
 impl SqsPoller {
-    pub async fn new(message_channel: Mutex<Sender<Message>>, message_deletion_receiver: Mutex<Receiver<String>>, queue_name: String) -> Self {
+    pub async fn new(listener_config: ListenerConfig, message_channel: Mutex<Sender<Message>>, message_deletion_receiver: Mutex<Receiver<String>>, queue_name: String) -> Self {
         let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
         let client = Client::new(&config);
         SqsPoller {
@@ -28,6 +30,7 @@ impl SqsPoller {
             message_channel,
             sqs_client: Arc::new(client),
             queue_url: format!("https://sqs.{}.amazonaws.com/{}/{}", config.region().unwrap().as_ref(), "975050130741", queue_name),
+            listener_config,
         }
     }
 
@@ -35,12 +38,14 @@ impl SqsPoller {
         let result = self.sqs_client.receive_message()
             .queue_url(&self.queue_url)
             .max_number_of_messages(10)
-            .visibility_timeout(Duration::from_secs(5).as_secs() as i32)
+            .visibility_timeout(self.listener_config.message_visibility_timeout.as_secs() as i32)
             .send().await;
         match result {
             Ok(message_output) => {
                 let messages = message_output.messages.unwrap_or_default();
-                tracing::info!("received messages size: {:?}", messages.len());
+                if !messages.is_empty() {
+                    tracing::info!("received messages size: {:?}", messages.len());
+                }
                 for message in messages {
                     let message_body = message.body.unwrap();
                     let item: Item = serde_json::from_str(message_body.as_ref())

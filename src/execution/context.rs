@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use std::env;
-use std::sync::Arc;
-use serde_json::{Map, Value};
 use crate::execution::model::{Execution, NodeExecutionState, WorkflowExecution};
 use crate::model::{LoopConfig, NodeConfig, NodeId};
 use crate::persistence::persistence::Repository;
+use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::env;
+use std::sync::Arc;
 
 async fn load_env_variables() -> Value {
     let mut variables = Map::new();
@@ -49,7 +49,7 @@ pub async fn build_context(repository: Arc<Repository>, workflow_execution: &Wor
 
     if !node_state.depth.is_empty() {
         let parent_node_id = node_state.depth.last().unwrap();
-        let parent_state_id = workflow_execution.get_state_id_of_node(parent_node_id);
+        let parent_state_id = workflow_execution.state_id_of_node(parent_node_id);
         let parent_node = workflow.get_node(parent_node_id).unwrap();
         if let NodeConfig::LoopNode(loop_config) = parent_node {
             let loop_state = repository.port.get_node_execution(&workflow.id, &workflow_execution.execution_id, &parent_state_id)

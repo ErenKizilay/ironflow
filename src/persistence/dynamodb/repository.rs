@@ -1,25 +1,25 @@
 use crate::execution::model::{NodeExecutionState, Status, WorkflowExecution, WorkflowExecutionError, WorkflowExecutionIdentifier};
 use crate::model::NodeId;
 use crate::persistence::model::{WriteRequest, WriteWorkflowExecutionRequest};
-use aws_sdk_dynamodb::config::BehaviorVersion;
-use aws_sdk_dynamodb::primitives::DateTime;
-use aws_sdk_dynamodb::types::{AttributeValue, Get, Put, ReturnValuesOnConditionCheckFailure, TransactGetItem, TransactWriteItem, Update};
-use aws_sdk_dynamodb::Client;
-use serde_dynamo::{to_attribute_value, to_item};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::time::SystemTime;
 use aws_sdk_dynamodb::config::http::HttpResponse;
+use aws_sdk_dynamodb::config::BehaviorVersion;
 use aws_sdk_dynamodb::error::SdkError;
 use aws_sdk_dynamodb::operation::get_item::{GetItemError, GetItemOutput};
 use aws_sdk_dynamodb::operation::transact_get_items::{TransactGetItemsError, TransactGetItemsOutput};
 use aws_sdk_dynamodb::operation::transact_write_items::{TransactWriteItemsError, TransactWriteItemsOutput};
+use aws_sdk_dynamodb::primitives::DateTime;
+use aws_sdk_dynamodb::types::{AttributeValue, Get, Put, ReturnValuesOnConditionCheckFailure, TransactGetItem, TransactWriteItem, Update};
+use aws_sdk_dynamodb::Client;
 use clap::builder::{Str, TypedValueParser};
 use reqwest::get;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_dynamo::aws_sdk_dynamodb_1::from_item;
+use serde_dynamo::{to_attribute_value, to_item};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::SystemTime;
 use tracing::error;
 use tracing_subscriber::fmt::format;
 
@@ -132,13 +132,14 @@ impl WriteRequest {
             WriteRequest::InitiateWorkflowExecution(initiate_workflow_exec_details) => {
                 let workflow_execution = WorkflowExecution {
                     execution_id: execution_identifier.execution_id.clone(),
+                    source: initiate_workflow_exec_details.source,
                     input: initiate_workflow_exec_details.input,
                     index: 0,
                     status: Status::Queued,
                     state_keys_by_node_id: Default::default(),
                     last_executed_node_id: None,
                     workflow: initiate_workflow_exec_details.workflow,
-                    authentication_providers: initiate_workflow_exec_details.authentication_providers,
+                    depth: initiate_workflow_exec_details.depth,
                     started_at: now_i64(),
                     updated_at: None,
                 };
@@ -391,14 +392,14 @@ fn now_i64() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-    use uuid::Uuid;
+    use super::*;
     use crate::execution::model::{ConditionExecution, Execution};
     use crate::expression::expression::{DynamicValue, Expression};
-    use crate::model::{Branch, BranchConfig, ConditionConfig, Graph, HttpConfig, StepTarget};
     use crate::model::NodeConfig::{BranchNode, ConditionNode, StepNode};
+    use crate::model::{Branch, BranchConfig, ConditionConfig, Graph, HttpConfig, StepTarget};
     use crate::persistence::model::{IncrementWorkflowIndexDetails, InitiateNodeExecDetails, InitiateWorkflowExecDetails, LockNodeExecDetails};
-    use super::*;
+    use serde_json::Value;
+    use uuid::Uuid;
     #[tokio::test]
     async fn test_initiate_workflow_execution() {
         let workflow_id = Uuid::new_v4().to_string();
@@ -410,7 +411,6 @@ mod tests {
             .execution_id(execution_id.clone())
             .write(WriteRequest::InitiateWorkflowExecution(InitiateWorkflowExecDetails {
                 input: Value::String("an input".to_string()),
-                authentication_providers: vec![],
                 workflow: workflow.clone(),
             }))
             .build()).await.unwrap();
@@ -426,7 +426,6 @@ mod tests {
             state_keys_by_node_id: Default::default(),
             last_executed_node_id: None,
             workflow: workflow.clone(),
-            authentication_providers: vec![],
             started_at: actual_exec.started_at,
             updated_at: None,
         };

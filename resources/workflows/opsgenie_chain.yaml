@@ -1,0 +1,7 @@
+name: opsgenie_chain
+nodes:
+  - !Workflow
+    id: run_og_workflow
+    workflow: opsgenie
+    input: "{{input}}"
+

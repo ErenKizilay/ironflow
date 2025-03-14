@@ -5,4 +5,5 @@ providers:
       host: api.opsgenie.com
       strategy: !Token
         name: Authorization
-        value: GenieKey b9bfb158-b945-43c6-b411-60e71927f984
+        value: !Plain
+          GenieKey b9bfb158-b945-43c6-b411-60e71927f984
