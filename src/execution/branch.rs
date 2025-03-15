@@ -32,7 +32,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
     let parent_state = command.parent_state;
     let workflow_execution = command.workflow_execution;
     let workflow = workflow_execution.workflow.clone();
-    let parent_state_id = workflow_execution.get_state_id_of_node(&parent_state.node_id);
+    let parent_state_id = workflow_execution.state_id_of_node(&parent_state.node_id);
     let branch_node = workflow.get_branch_node(&parent_state.node_id).unwrap();
     let branches_by_name = branch_node
         .branches

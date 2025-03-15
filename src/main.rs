@@ -1,5 +1,5 @@
-use uuid::Uuid;
-use crate::engine::Engine;
+use crate::config::configuration::{load_iron_flow_config, ConfigOptions, ConfigSource, IronFlowConfig};
+use crate::engine::IronFlow;
 
 mod execution;
 mod expression;
@@ -12,16 +12,14 @@ mod engine;
 mod listener;
 mod aws_lambda;
 mod api;
+mod config;
+mod secret;
 
 #[tokio::main]
 async fn main() {
     setup_logging();
-    let mut engine = Engine::new()
-        .await
-        .load_auth_providers_locally("resources/auth.yaml")
-        .load_workflows_locally("resources/workflows")
-        .await;
-    engine.start().await;
+    let iron_flow_config = load_iron_flow_config();
+    IronFlow::run(iron_flow_config).await;
 }
 
 fn setup_logging() {

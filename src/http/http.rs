@@ -1,9 +1,7 @@
-use crate::model::HttpConfig;
 use bon::Builder;
 use jmespath::functions::Function;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Body, Client, Error, Method, Response, Url};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 

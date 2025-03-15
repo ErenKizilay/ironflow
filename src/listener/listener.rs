@@ -1,5 +1,5 @@
-use crate::auth::http::AuthenticationProvider;
-use crate::engine::Engine;
+use crate::auth::http::HttpAuthentication;
+use crate::engine::IronFlow;
 use crate::execution::execution::WorkflowExecutor;
 use crate::execution::model::NodeExecutionState;
 use crate::listener::sqs::sqs_poller::SqsPoller;
@@ -11,8 +11,10 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio_util::task::TaskTracker;
+use crate::config::configuration::ListenerConfig;
 
 pub struct Listener {
+    listener_config: ListenerConfig,
     workflow_executor: Arc<WorkflowExecutor>,
     receiver: Mutex<Receiver<Message>>,
     message_deletion_sender: Arc<Mutex<Sender<String>>>,
@@ -28,18 +30,19 @@ pub struct Message {
 }
 
 impl Listener {
-    pub async fn new(shutdown_receiver: watch::Receiver<bool>, repository: Arc<Repository>) -> Self {
+    pub async fn new(listener_config: ListenerConfig, shutdown_receiver: watch::Receiver<bool>, workflow_executor: Arc<WorkflowExecutor>) -> Self {
         let (tx, mut rx) = mpsc::channel(32);
         let (message_deletion_tx, mut message_deletion_rx) = mpsc::channel(32);
         let sender: Mutex<Sender<Message>> = Mutex::new(tx);
         let receiver: Mutex<Receiver<Message>> = Mutex::new(rx);
         Listener {
+            listener_config: listener_config.clone(),
             shutdown_receiver,
-            workflow_executor: Arc::new(WorkflowExecutor::new(repository).await),
+            workflow_executor,
             receiver,
             message_deletion_sender: Arc::new(Mutex::new(message_deletion_tx)),
             task_tracker: TaskTracker::new(),
-            sqs_poller: Arc::new(SqsPoller::new(sender, Mutex::new(message_deletion_rx), "ironflow_node_executions".to_string()).await),
+            sqs_poller: Arc::new(SqsPoller::new(listener_config, sender, Mutex::new(message_deletion_rx), "ironflow_node_executions".to_string()).await),
         }
     }
 
@@ -69,24 +72,10 @@ impl Listener {
                 _ = shutdown_receiver.changed() => {
                     if *shutdown_receiver.borrow() {
                         self.sqs_poller.stop().await;
-                        tracing::info!("Shutdown signal received. Exiting listener loop...");
                         receiver.close();
                     }
                 }
             }
         }
-    }
-
-    pub async fn run_workflow(
-        &self,
-        execution_id: String,
-        workflow: Graph,
-        auth_provider: Vec<AuthenticationProvider>,
-        input: Value,
-    ) {
-        tracing::info!("Will run workflow: {}", workflow.id);
-        self.workflow_executor
-            .start(workflow.clone(), execution_id, input, auth_provider)
-            .await;
     }
 }

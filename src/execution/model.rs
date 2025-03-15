@@ -1,11 +1,9 @@
-use crate::auth::http::AuthenticationProvider;
 use crate::model::{Graph, Node, NodeId};
 use bon::Builder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Display;
-use clap::builder::Str;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NodeExecutionState {
@@ -27,6 +25,13 @@ pub enum Execution {
     Branch(BranchExecution),
     Condition(ConditionExecution),
     Assertion(AssertionExecution),
+    Workflow(ChainExecution),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChainExecution {
+    pub child_identifier: WorkflowExecutionIdentifier,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -38,25 +43,34 @@ pub struct StepExecution {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkflowExecution {
     pub execution_id: String,
+    pub source: ExecutionSource,
     pub input: Value,
     pub index: usize,
     pub status: Status,
     pub state_keys_by_node_id: HashMap<NodeId, String>,
     pub last_executed_node_id: Option<NodeId>,
     pub workflow: Graph,
-    pub authentication_providers: Vec<AuthenticationProvider>,
+    pub depth: Vec<WorkflowExecutionIdentifier>,
     pub started_at: i64,
     pub updated_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum  ExecutionSource {
     Manual,
-    Workflow(WorkflowExecutionIdentifier),
+    Workflow(WorkflowSource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkflowSource {
+    pub execution_identifier: WorkflowExecutionIdentifier,
+    pub caller_node_id: NodeId,
+    pub caller_node_state_id: String,
 }
 
 impl WorkflowExecution {
 
-    pub fn get_state_id_of_node(&self, node_id: &NodeId) -> String {
+    pub fn state_id_of_node(&self, node_id: &NodeId) -> String {
         self.state_keys_by_node_id.get(node_id).cloned().unwrap_or_default()
     }
 
@@ -181,8 +195,17 @@ pub(crate) struct ContinueParentNodeExecutionCommand {
     pub(crate) child_state: Option<NodeExecutionState>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkflowExecutionIdentifier {
     pub workflow_id: String,
     pub execution_id: String,
+}
+
+#[derive(Builder)]
+pub(crate) struct StartWorkflowCommand {
+    pub workflow_id: String,
+    pub execution_id: Option<String>,
+    pub input: Value,
+    pub source: ExecutionSource,
+    pub dept_so_far: Vec<WorkflowExecutionIdentifier>,
 }

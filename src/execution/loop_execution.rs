@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use crate::execution::model::Execution::{Condition, Loop};
-use crate::execution::model::{ContinueParentNodeExecutionCommand, Execution, LoopExecution, NodeExecutionState, Status};
+use crate::execution::model::Execution::Loop;
+use crate::execution::model::{ContinueParentNodeExecutionCommand, Execution, LoopExecution, Status};
 use crate::model::{LoopConfig, NodeConfig};
-use serde_json::Value;
-use crate::persistence::model::{IncrementLoopIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, WriteRequest, WriteWorkflowExecutionRequest};
+use crate::persistence::model::{IncrementLoopIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, WriteRequest, WriteWorkflowExecutionRequest};
 use crate::persistence::persistence::Repository;
+use serde_json::Value;
+use std::sync::Arc;
 
 pub async fn initiate_execution(loop_config: &LoopConfig, context: &Value) -> (Status, Execution) {
     let condition_result = loop_config.array.resolve(context.clone());
@@ -32,7 +32,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
     let parent_state = command.parent_state;
     let workflow_execution = command.workflow_execution;
     let workflow = workflow_execution.workflow.clone();
-    let parent_state_id = workflow_execution.get_state_id_of_node(&parent_state.node_id);
+    let parent_state_id = workflow_execution.state_id_of_node(&parent_state.node_id);
     let loop_node = workflow.get_node(&parent_state.node_id).unwrap();
     match loop_node {
         NodeConfig::LoopNode(loop_config) => {

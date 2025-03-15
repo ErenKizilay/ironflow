@@ -1,5 +1,6 @@
 use crate::aws_lambda;
 use aws_sdk_dynamodb::config::http::HttpResponse;
+use aws_sdk_lambda::error::ProvideErrorMetadata;
 use aws_sdk_lambda::operation::invoke::{InvokeError, InvokeOutput};
 use aws_sdk_lambda::primitives::Blob;
 use aws_sdk_lambda::types::{InvocationType, LogType};
@@ -9,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::string::FromUtf8Error;
 use std::sync::Arc;
-use aws_sdk_lambda::error::ProvideErrorMetadata;
 
 pub struct LambdaClient {
     client: Client,
