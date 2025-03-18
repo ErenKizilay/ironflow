@@ -1,26 +1,30 @@
 use crate::auth::http::HttpAuthentication;
+use crate::config::configuration::{ListenerConfig, QueueProvider};
 use crate::engine::IronFlow;
 use crate::execution::execution::WorkflowExecutor;
 use crate::execution::model::NodeExecutionState;
-use crate::listener::sqs::sqs_poller::SqsPoller;
+use crate::listener::sqs::sqs_poller::SqsAdapter;
 use crate::model::Graph;
-use crate::persistence::persistence::{InMemoryRepository, Repository};
+use crate::persistence::persistence::{Repository};
+use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
+use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::Sender;
+use tokio::sync::watch::Receiver;
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio_util::task::TaskTracker;
-use crate::config::configuration::ListenerConfig;
+use crate::in_memory::adapters::{in_memory_persistence, in_memory_queue};
+use crate::listener::queue::QueuePort;
 
 pub struct Listener {
     listener_config: ListenerConfig,
     workflow_executor: Arc<WorkflowExecutor>,
-    receiver: Mutex<Receiver<Message>>,
-    message_deletion_sender: Arc<Mutex<Sender<String>>>,
-    task_tracker: TaskTracker,
-    shutdown_receiver: watch::Receiver<bool>,
-    sqs_poller: Arc<SqsPoller>,
+    task_channel_sender: Sender<Message>,
+    shutdown_receiver: Receiver<bool>,
+    queue_port: Arc<dyn QueuePort>,
+    poll_receiver: Receiver<SystemTime>,
+
 }
 
 #[derive(Debug)]
@@ -30,52 +34,60 @@ pub struct Message {
 }
 
 impl Listener {
-    pub async fn new(listener_config: ListenerConfig, shutdown_receiver: watch::Receiver<bool>, workflow_executor: Arc<WorkflowExecutor>) -> Self {
-        let (tx, mut rx) = mpsc::channel(32);
-        let (message_deletion_tx, mut message_deletion_rx) = mpsc::channel(32);
-        let sender: Mutex<Sender<Message>> = Mutex::new(tx);
-        let receiver: Mutex<Receiver<Message>> = Mutex::new(rx);
+    pub async fn new(
+        listener_config: ListenerConfig,
+        shutdown_receiver: watch::Receiver<bool>,
+        task_channel_sender: Sender<Message>,
+        workflow_executor: Arc<WorkflowExecutor>,
+        poll_receiver: Receiver<SystemTime>,
+    ) -> Self {
         Listener {
+            task_channel_sender,
             listener_config: listener_config.clone(),
             shutdown_receiver,
             workflow_executor,
-            receiver,
-            message_deletion_sender: Arc::new(Mutex::new(message_deletion_tx)),
-            task_tracker: TaskTracker::new(),
-            sqs_poller: Arc::new(SqsPoller::new(listener_config, sender, Mutex::new(message_deletion_rx), "ironflow_node_executions".to_string()).await),
+            queue_port: match listener_config.queue_provider {
+                QueueProvider::SQS => {
+                    tracing::info!("Queue port: SQS");
+                    SqsAdapter::new(listener_config, "ironflow_node_executions".to_string())
+                        .await
+                }
+                QueueProvider::InMemory => {
+                    tracing::info!("Queue port: InMemory");
+                    in_memory_queue().clone()
+                }
+            },
+            poll_receiver,
         }
     }
 
-    pub async fn start(self: Arc<Self>) {
-        let mut receiver = self.receiver.lock().await;
+    pub async fn listen_messages(&self) {
         let mut shutdown_receiver = self.shutdown_receiver.clone();
-        self.sqs_poller.clone().start().await;
+        let mut poll_receiver = self.poll_receiver.clone();
         loop {
             tokio::select! {
-                Some(message) = receiver.recv() => {
-                    tracing::info!("Listener received state:\n{:#?}", message.node_execution_state);
-                    let workflow_executor = self.workflow_executor.clone();
-                    let mut message_deletion_sender = self.message_deletion_sender.clone();
-                    self.task_tracker.spawn(async move {
-                        let exec_result = workflow_executor.continue_execution(&message.node_execution_state).await;
-                        match exec_result {
-                            Ok(_) => {
-                                message_deletion_sender.lock().await.send(message.id).await
-                                .unwrap();
-                            },
-                            Err(err) => {
-                                tracing::error!("Failed to execute node execution: {}", err);
-                            }
+                _ = poll_receiver.changed() => {
+                    tracing::info!("Polling activated...");
+                    while SystemTime::now().duration_since(*poll_receiver.borrow_and_update()).unwrap().as_secs() < 5 {
+                        let messages = self.queue_port.receive_messages().await;
+                        for message in messages {
+                            self.task_channel_sender.send(message).await
+                            .unwrap();
                         }
-                    });
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                    tracing::info!("Polling deactivated.");
                 }
                 _ = shutdown_receiver.changed() => {
-                    if *shutdown_receiver.borrow() {
-                        self.sqs_poller.stop().await;
-                        receiver.close();
-                    }
+                    tracing::info!("Lister is shutting down");
+                    break;
                 }
             }
+            tokio::time::sleep(self.listener_config.poll_interval).await
         }
+    }
+
+    pub async fn delete_message(&self, message_id: &String) {
+        self.queue_port.delete_message(message_id).await;
     }
 }

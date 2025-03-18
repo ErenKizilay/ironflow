@@ -14,6 +14,7 @@ mod aws_lambda;
 mod api;
 mod config;
 mod secret;
+mod in_memory;
 
 #[tokio::main]
 async fn main() {

@@ -3,7 +3,7 @@ use crate::execution::model::Execution::Condition;
 use crate::execution::model::{ConditionExecution, Execution, NodeExecutionState, Status};
 use crate::model::{ConditionConfig, NodeConfig};
 use crate::persistence::model::{IncrementConditionIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest};
-use crate::persistence::persistence::{InMemoryRepository, Repository};
+use crate::persistence::persistence::{Repository};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -40,7 +40,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                 };
                 if condition_exec.index == child_nodes.len() {
                     tracing::info!("Condition Execution over!");
-                    repository.port
+                    repository
                         .write_workflow_execution(
                             WriteWorkflowExecutionRequest::builder()
                                 .workflow_id(workflow.id.clone())
@@ -60,7 +60,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                     tracing::info!("will initiate condition child node with state id: {}", child_state_id);
                     let mut path_so_far = parent_state.depth.clone();
                     path_so_far.push(parent_state.node_id.clone());
-                    repository.port
+                    repository
                         .write_workflow_execution(
                             WriteWorkflowExecutionRequest::builder()
                                 .workflow_id(workflow.id.clone())

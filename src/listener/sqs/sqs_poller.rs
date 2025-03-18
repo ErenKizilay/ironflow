@@ -8,33 +8,42 @@ use aws_sdk_sqs::Client;
 use serde_dynamo::{from_item, Item};
 use std::sync::Arc;
 use std::time::Duration;
+use async_trait::async_trait;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tracing::trace;
 use crate::config::configuration::ListenerConfig;
+use crate::listener::queue::QueuePort;
 
-pub struct SqsPoller {
-    message_channel: Mutex<Sender<Message>>,
-    message_deletion_receiver: Mutex<Receiver<String>>,
+pub struct SqsAdapter {
     sqs_client: Arc<Client>,
     queue_url: String,
     listener_config: ListenerConfig
 }
 
-impl SqsPoller {
-    pub async fn new(listener_config: ListenerConfig, message_channel: Mutex<Sender<Message>>, message_deletion_receiver: Mutex<Receiver<String>>, queue_name: String) -> Self {
+impl SqsAdapter {
+    pub(crate) async fn new(listener_config: ListenerConfig, queue_name: String) -> Arc<SqsAdapter> {
         let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
         let client = Client::new(&config);
-        SqsPoller {
-            message_deletion_receiver,
-            message_channel,
-            sqs_client: Arc::new(client),
-            queue_url: format!("https://sqs.{}.amazonaws.com/{}/{}", config.region().unwrap().as_ref(), "975050130741", queue_name),
-            listener_config,
-        }
+        let queue_url = client.list_queues()
+            .queue_name_prefix(queue_name.clone())
+            .send().await.unwrap().queue_urls
+            .unwrap()
+            .iter().next().unwrap().clone();
+        Arc::new(
+            SqsAdapter {
+                sqs_client: Arc::new(client),
+                queue_url: queue_url,
+                listener_config,
+            }
+        )
     }
+}
 
-    async fn poll(&self) {
+#[async_trait]
+impl QueuePort for SqsAdapter {
+
+    async fn receive_messages(&self) -> Vec<Message> {
         let result = self.sqs_client.receive_message()
             .queue_url(&self.queue_url)
             .max_number_of_messages(10)
@@ -43,61 +52,39 @@ impl SqsPoller {
         match result {
             Ok(message_output) => {
                 let messages = message_output.messages.unwrap_or_default();
-                if !messages.is_empty() {
-                    tracing::info!("received messages size: {:?}", messages.len());
-                }
-                for message in messages {
-                    let message_body = message.body.unwrap();
-                    let item: Item = serde_json::from_str(message_body.as_ref())
-                        .expect("expected to deserialize DynamoDB JSON format");
-                    let node_exec_state: NodeExecutionState = from_item(item.clone())
-                        .expect(format!("expected NodeExecutionState in DynamoDB JSON format, got {:?}", item).as_str());
-                    self.message_channel.lock()
-                        .await.send(Message {
-                        node_execution_state: node_exec_state,
-                        id: message.receipt_handle.unwrap(),
-                    })
-                        .await.unwrap();
-                }
+                messages.iter()
+                    .map(|sqs_message| {
+                        let message_body = sqs_message.clone().body.unwrap();
+                        let item: Item = serde_json::from_str(message_body.as_ref())
+                            .expect("expected to deserialize DynamoDB JSON format");
+                        let node_exec_state: NodeExecutionState = from_item(item.clone())
+                            .expect(format!("expected NodeExecutionState in DynamoDB JSON format, got {:?}", item).as_str());
+                        Message {
+                            node_execution_state: node_exec_state,
+                            id: sqs_message.clone().receipt_handle.unwrap(),
+                        }
+                    }).collect()
             }
             Err(err) => {
                 tracing::error!("Error polling sqs message: {}", err);
+                vec![]
             }
         }
     }
 
-    async fn delete_message(&self) {
-        while let Some(message_id) = self.message_deletion_receiver.lock().await.recv().await {
-            let result = self.sqs_client.delete_message()
-                .queue_url(&self.queue_url)
-                .receipt_handle(message_id.clone())
-                .send().await;
-            match result {
-                Ok(_) => {
-                    tracing::info!("Message deleted successfully");
-                }
-                Err(err) => {
-                    tracing::error!("Error deleting message: {}", err);
-                }
+    async fn delete_message(&self, message_id: &String) {
+        let result = self.sqs_client.delete_message()
+            .queue_url(&self.queue_url)
+            .receipt_handle(message_id.clone())
+            .send().await;
+        match result {
+            Ok(_) => {
+                tracing::info!("Message deleted successfully");
+            }
+            Err(err) => {
+                tracing::error!("Error deleting message: {}", err);
             }
         }
     }
 
-    pub async fn start(self: Arc<Self>) {
-        tracing::info!("Starting SQS poller");
-        let cloned_self = self.clone();
-        tokio::spawn(async move {
-            cloned_self.delete_message().await;
-        });
-        tokio::spawn(async move {
-            loop {
-                self.poll().await;
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
-        });
-    }
-
-    pub async fn stop(&self) {
-        self.message_channel.lock().await.closed().await;
-    }
 }

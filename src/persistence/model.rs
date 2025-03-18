@@ -1,14 +1,10 @@
 use crate::execution::model::{Execution, ExecutionSource, NodeExecutionState, Status, WorkflowExecutionError, WorkflowExecutionIdentifier};
 use crate::model::{Graph, NodeId};
-use crate::persistence::dynamodb::repository::DynamoDbRepository;
+use crate::persistence::dynamodb::adapter::DynamoDbRepository;
 use bon::Builder;
 use serde_json::Value;
 use std::collections::HashMap;
 
-pub enum PersistencePort {
-    DynamoDb(DynamoDbRepository),
-    InMemory,
-}
 
 #[derive(Builder)]
 pub struct UpdateWorkflowExecutionRequest {

@@ -101,7 +101,7 @@ async fn get_workflow_exec(
     State(app_state): State<ApiState>,
     Json(input): Json<Value>,
 ) -> Result<Json<WorkflowExecution>, String>{
-    let result = app_state.repository.port.get_workflow_execution(&workflow_id, &execution_id).await;
+    let result = app_state.repository.get_workflow_execution(&workflow_id, &execution_id).await;
     match result {
         Ok(workflow_opt) => {
             match workflow_opt {

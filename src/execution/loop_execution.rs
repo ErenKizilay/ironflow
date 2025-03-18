@@ -41,7 +41,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                 match command.child_state {
                     None => {
                         if loop_execution.iteration_count >= items.len() {
-                            repository.port.write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                            repository.write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                                 .workflow_id(workflow.id.clone())
                                 .execution_id(workflow_execution.execution_id.clone())
                                 .write(WriteRequest::UpdateNodeStatus(UpdateNodeStatusDetails {
@@ -49,13 +49,13 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                     state_id: parent_state_id.clone(),
                                     status: Status::Success,
                                 }))
-                                .build()).await;
+                                .build()).await.unwrap();
                         }
                         else {
                             let mut path_so_far = parent_state.depth.clone();
                             path_so_far.push(parent_state.node_id.clone());
                             let child_node_to_queue = loop_config.nodes.get(loop_execution.index).unwrap();
-                            repository.port.write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                            repository.write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                                 .workflow_id(workflow.id.clone())
                                 .execution_id(workflow_execution.execution_id.clone())
                                 .write(WriteRequest::InitiateNodeExec(InitiateNodeExecDetails {
@@ -63,11 +63,11 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                     state_id: format!("{}_{}", child_node_to_queue.name, loop_execution.iteration_count),
                                     dept: path_so_far,
                                 }))
-                                .build()).await;
+                                .build()).await.unwrap();
                         }
                     }
                     Some(child_state) => {
-                        repository.port.write_workflow_execution(WriteWorkflowExecutionRequest::builder()
+                        repository.write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                             .workflow_id(workflow.id.clone())
                             .execution_id(workflow_execution.execution_id.clone())
                             .write(WriteRequest::IncrementLoopIndex(IncrementLoopIndexDetails {
@@ -76,7 +76,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                 next_index: get_next_index(&loop_config, loop_execution),
                                 iteration_count: get_iteration_count(&loop_config, loop_execution),
                             }))
-                            .build()).await;
+                            .build()).await.unwrap();
                     }
                 }
             }
