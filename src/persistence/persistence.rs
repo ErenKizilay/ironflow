@@ -1,88 +1,80 @@
 use crate::execution::model::{NodeExecutionState, WorkflowExecution};
-use crate::model::Graph;
-use crate::persistence::dynamodb::repository::DynamoDbRepository;
-use crate::persistence::model::{PersistencePort, WriteWorkflowExecutionRequest};
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use crate::persistence::dynamodb::adapter::DynamoDbRepository;
+use crate::persistence::model::WriteWorkflowExecutionRequest;
+use async_trait::async_trait;
+use std::fmt::Display;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex;
+use crate::config::configuration::{PersistenceConfig, PersistenceProvider};
+use crate::in_memory::adapters::{in_memory_persistence, InMemoryRepositoryAdapter};
 
-#[derive(Debug)]
-pub struct InMemoryRepository {
-    workflows: Mutex<HashMap<String, Graph>>,
-    workflow_executions: Arc<Mutex<HashMap<String, WorkflowExecution>>>,
-    node_executions: Arc<Mutex<HashMap<String, NodeExecutionState>>>,
-    sender: Mutex<Sender<NodeExecutionState>>,
+#[async_trait]
+pub trait PersistencePort: Send + Sync {
+    async fn write_workflow_execution(&self, request: WriteWorkflowExecutionRequest) -> Result<(), PersistenceError>;
 
-}
-
-pub struct Repository {
-    pub port: PersistencePort
-}
-
-impl Repository {
-    pub fn new(port: PersistencePort) -> Self {
-        Self { port }
-    }
-    pub async fn of_dynamodb() -> Self {
-        Repository::new(PersistencePort::DynamoDb(DynamoDbRepository::new().await))
-    }
-}
-
-impl PersistencePort {
-
-    pub async fn write_workflow_execution(&self, request: WriteWorkflowExecutionRequest) {
-        match self {
-            PersistencePort::DynamoDb(dynamo_db_repo) => {
-                dynamo_db_repo.transact_write_items(request).await.unwrap();
-            }
-            PersistencePort::InMemory => {}
-        }
-    }
-
-    pub async fn get_workflow_execution(
+    async fn get_workflow_execution(
         &self,
         workflow_id: &String,
         execution_id: &String,
-    ) -> Result<Option<WorkflowExecution>, PersistenceError> {
+    ) -> Result<Option<WorkflowExecution>, PersistenceError>;
 
-        match self {
-            PersistencePort::DynamoDb(dynamo_db_repo) => {
-                Ok(dynamo_db_repo.get_workflow_execution(workflow_id, execution_id).await)
-            }
-            _ => {todo!()}
-        }
-    }
-
-    pub async fn get_node_execution(
+    async fn get_node_execution(
         &self,
         workflow_id: &String,
         execution_id: &String,
         state_id: &String,
-    ) -> Result<Option<NodeExecutionState>, PersistenceError> {
+    ) -> Result<Option<NodeExecutionState>, PersistenceError>;
 
-        match self {
-            PersistencePort::DynamoDb(dynamo_db_repo) => {
-                Ok(dynamo_db_repo.get_node_execution(workflow_id, execution_id, state_id).await)
-            }
-            _ => {todo!()}
-        }
-    }
-
-    pub async fn get_node_executions(
+    async fn get_node_executions(
         &self,
         workflow_id: &String,
         execution_id: &String,
         state_ids: Vec<String>,
-    ) -> Vec<NodeExecutionState> {
+    ) -> Vec<NodeExecutionState>;
+}
 
-        match self {
-            PersistencePort::DynamoDb(dynamo_db_repo) => {
-                dynamo_db_repo.get_node_executions(workflow_id, execution_id, state_ids).await
+pub struct Repository {
+    pub delegate: Arc<dyn PersistencePort>,
+}
+
+impl Repository {
+
+    pub async fn new(config: PersistenceConfig) -> Self {
+        match config.provider {
+            PersistenceProvider::DynamoDb => {
+                tracing::info!("Persistence port: DynamoDb");
+                Self::of_dynamodb().await
             }
-            _ => {todo!()}
+            PersistenceProvider::InMemory => {
+                tracing::info!("Persistence port: InMemory");
+                Self::of_in_memory().await
+            }
         }
+    }
+
+    fn of(delegate: Arc<dyn PersistencePort>) -> Self {
+        Self { delegate }
+    }
+    async fn of_dynamodb() -> Self {
+        Repository::of(Arc::new(DynamoDbRepository::new().await))
+    }
+
+    async fn of_in_memory() -> Self {
+        Repository::of(in_memory_persistence().clone())
+    }
+    pub async fn write_workflow_execution(&self, request: WriteWorkflowExecutionRequest) -> Result<(), PersistenceError> {
+        self.delegate.write_workflow_execution(request).await
+    }
+
+    pub async fn get_workflow_execution(&self, workflow_id: &String, execution_id: &String) -> Result<Option<WorkflowExecution>, PersistenceError> {
+        self.delegate.get_workflow_execution(workflow_id, execution_id).await
+    }
+
+    pub async fn get_node_execution(&self, workflow_id: &String, execution_id: &String, state_id: &String) -> Result<Option<NodeExecutionState>, PersistenceError> {
+        self.delegate.get_node_execution(workflow_id, execution_id, state_id).await
+    }
+
+    pub async fn get_node_executions(&self, workflow_id: &String, execution_id: &String, state_ids: Vec<String>) -> Vec<NodeExecutionState> {
+        self.delegate.get_node_executions(workflow_id, execution_id, state_ids).await
     }
 }
 
@@ -92,8 +84,4 @@ pub enum PersistenceError {
     Internal(String),
 }
 
-impl Display for PersistenceError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
+

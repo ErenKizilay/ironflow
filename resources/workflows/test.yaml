@@ -1,0 +1,52 @@
+name: httpbin
+nodes:
+  - !Http
+    id: get_uuid
+    url: https://httpbin.org/uuid
+    method: GET
+  - !Http
+    id: create_todo
+    url: https://httpbin.org/anything/todos
+    method: POST
+    body:
+      id: "{{get_uuid.body.uuid}}"
+      summary: "{{input.summary}}"
+      description: "{{input.description}}"
+      enabled: "{{input.enabled}}"
+  - !Assertion
+    id: assert_created_todo_fields
+    assertions:
+      - !Equals
+        left: "{{create_todo.body.json.id}}"
+        right: "{{get_uuid.body.uuid}}"
+      - !NotEquals
+        left: "{{create_todo.body.json.message}}"
+        right: "{{input.message}}"
+  - !Condition
+    id: if_a_condition
+    expression: "{{create_todo.body.json.enabled)}}"
+    true_branch:
+      - !Http
+        id: update_todo
+        url: "{{join('', ['https://httpbin.org/anything/todos/', create_todo.body.json.id])}}"
+        method: PATCH
+        body:
+          updated: true
+  - !Branch
+    id: switch_case
+    branches:
+      case_202:
+        - !Http
+          id: should_return_202
+          url: https://httpbin.org/status/202
+          method: GET
+      case_404:
+        - !Http
+          id: should_return_404
+          url: https://httpbin.org/status/200
+          method: GET
+      case_500:
+        - !Http
+          id: should_return_500
+          url: https://httpbin.org/status/500
+          method: GET

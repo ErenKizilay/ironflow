@@ -18,6 +18,7 @@ use tokio_util::task::TaskTracker;
 pub struct IronFlowConfig {
     pub config_options: ConfigOptions,
     pub lister_config: ListenerConfig,
+    pub persistence_config: PersistenceConfig,
     pub execution_config: ExecutionConfig,
     pub api_config: ApiConfig,
 }
@@ -33,9 +34,27 @@ pub struct ExecutionConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct PersistenceConfig {
+    pub provider : PersistenceProvider,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ListenerConfig {
     pub poll_interval: Duration,
+    pub queue_provider: QueueProvider,
     pub message_visibility_timeout: Duration,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub enum QueueProvider {
+    SQS,
+    InMemory
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub enum PersistenceProvider {
+    DynamoDb,
+    InMemory
 }
 
 impl Default for ApiConfig {
@@ -52,10 +71,19 @@ impl Default for ExecutionConfig {
     }
 }
 
+impl Default for PersistenceConfig {
+    fn default() -> Self {
+        PersistenceConfig {
+            provider: PersistenceProvider::DynamoDb,
+        }
+    }
+}
+
 impl Default for ListenerConfig {
     fn default() -> Self {
         ListenerConfig {
             poll_interval: Duration::from_millis(300),
+            queue_provider: QueueProvider::SQS,
             message_visibility_timeout: Duration::from_secs(30),
         }
     }
@@ -66,10 +94,19 @@ impl IronFlowConfig {
         IronFlowConfig {
             config_options,
             lister_config: Default::default(),
+            persistence_config: Default::default(),
             execution_config: Default::default(),
             api_config: Default::default(),
         }
     }
+
+    pub fn of_in_memory(config_options: ConfigOptions) -> IronFlowConfig {
+        let mut default = Self::default(config_options);
+        default.lister_config.queue_provider = QueueProvider::InMemory;
+        default.persistence_config.provider = PersistenceProvider::InMemory;
+        default
+    }
+
 }
 
 pub struct ConfigurationManager {

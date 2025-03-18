@@ -2,7 +2,7 @@ use crate::execution::model::ContinueParentNodeExecutionCommand;
 use crate::execution::model::{BranchExecution, Execution, NodeExecutionState, Status};
 use crate::model::{Branch, BranchConfig, ConditionConfig, NodeId};
 use crate::persistence::model::{IncrementBranchIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest};
-use crate::persistence::persistence::{InMemoryRepository, Repository};
+use crate::persistence::persistence::{Repository};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -65,7 +65,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                             })
                         })
                         .collect();
-                    repository.port
+                    repository
                         .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                             .workflow_id(workflow.id.clone())
                             .execution_id(workflow_execution.execution_id.clone())
@@ -81,7 +81,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                         });
                     if must_finish_branch_exec {
                         tracing::info!("Branch execution over!");
-                        repository.port
+                        repository
                             .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                                 .workflow_id(workflow.id.clone())
                                 .execution_id(workflow_execution.execution_id.clone())
@@ -106,7 +106,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                             let next_node_id = branch.nodes.get(branch_index.clone()).unwrap();
                             let next_state_id =
                                 format!("{}_{}", branch.name, next_node_id.name);
-                            repository.port
+                            repository
                                 .write_workflow_execution(WriteWorkflowExecutionRequest::builder()
                                     .workflow_id(workflow.id.clone())
                                     .execution_id(workflow_execution.execution_id.clone())

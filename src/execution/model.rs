@@ -74,6 +74,11 @@ impl WorkflowExecution {
         self.state_keys_by_node_id.get(node_id).cloned().unwrap_or_default()
     }
 
+    pub fn state_id_of_last_executed_node(&self) -> Option<String> {
+        self.last_executed_node()
+            .map(|node|self.state_id_of_node(&node.id))
+    }
+
     pub fn last_executed_node(&self) -> Option<Node> {
         let index = if self.workflow.node_ids.len() == self.index {self.index - 1} else {self.index};
         let workflow = &self.workflow;

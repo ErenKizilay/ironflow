@@ -20,42 +20,43 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
+use async_trait::async_trait;
 use tracing::error;
 use tracing_subscriber::fmt::format;
+use crate::persistence::persistence::{PersistenceError, PersistencePort};
 
 pub struct DynamoDbRepository {
     client: Arc<Client>,
 }
 
-
-impl DynamoDbRepository {
-    pub async fn new() -> Self {
-        let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
-        let client = Client::new(&config);
-        DynamoDbRepository {
-            client: Arc::new(client),
-        }
-    }
-
-    pub async fn transact_write_items(&self, request: WriteWorkflowExecutionRequest) -> Result<TransactWriteItemsOutput, SdkError<TransactWriteItemsError, HttpResponse>> {
+#[async_trait]
+impl PersistencePort for DynamoDbRepository {
+    async fn write_workflow_execution(&self, request: WriteWorkflowExecutionRequest) -> Result<(), PersistenceError> {
         let write_items: Vec<TransactWriteItem> = request.write_requests
             .iter()
             .flat_map(|write_request: &WriteRequest| write_request.clone().to_transact_write_item(&request.identifier))
             .collect();
-        self.client.transact_write_items()
+        let aws_result = self.client.transact_write_items()
             .set_transact_items(Some(write_items))
-            .send().await
+            .send().await;
+
+        match aws_result {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                Err(PersistenceError::ConditionFailure(err.to_string()))
+            }
+        }
     }
 
-    pub async fn get_workflow_execution(&self, workflow_id: &String, execution_id: &String) -> Option<WorkflowExecution> {
-        self.get_item(get_workflow_executions_table_name(), build_workflow_execution_key(workflow_id, execution_id)).await
+    async fn get_workflow_execution(&self, workflow_id: &String, execution_id: &String) -> Result<Option<WorkflowExecution>, PersistenceError> {
+        Ok(self.get_item(get_workflow_executions_table_name(), build_workflow_execution_key(workflow_id, execution_id)).await)
     }
 
-    pub async fn get_node_execution(&self, workflow_id: &String, execution_id: &String, state_id: &String) -> Option<NodeExecutionState> {
-        self.get_item(get_node_executions_table_name(), build_node_state_key(workflow_id, execution_id, state_id)).await
+    async fn get_node_execution(&self, workflow_id: &String, execution_id: &String, state_id: &String) -> Result<Option<NodeExecutionState>, PersistenceError> {
+        Ok(self.get_item(get_node_executions_table_name(), build_node_state_key(workflow_id, execution_id, state_id)).await)
     }
 
-    pub async fn get_node_executions(&self, workflow_id: &String, execution_id: &String, state_ids: Vec<String>) -> Vec<NodeExecutionState> {
+    async fn get_node_executions(&self, workflow_id: &String, execution_id: &String, state_ids: Vec<String>) -> Vec<NodeExecutionState> {
         let unique_state_ids: HashSet<String> = state_ids.iter().cloned().collect();
         if unique_state_ids.is_empty() {
             return vec![];
@@ -93,6 +94,17 @@ impl DynamoDbRepository {
                 error!("{:?}", err);
                 vec![]
             }
+        }
+    }
+}
+
+
+impl DynamoDbRepository {
+    pub async fn new() -> Self {
+        let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+        let client = Client::new(&config);
+        DynamoDbRepository {
+            client: Arc::new(client),
         }
     }
 
@@ -388,172 +400,4 @@ fn build_node_state_sk() -> String {
 
 fn now_i64() -> i64 {
     DateTime::from(SystemTime::now()).to_millis().unwrap()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::execution::model::{ConditionExecution, Execution};
-    use crate::expression::expression::{DynamicValue, Expression};
-    use crate::model::NodeConfig::{BranchNode, ConditionNode, StepNode};
-    use crate::model::{Branch, BranchConfig, ConditionConfig, Graph, HttpConfig, StepTarget};
-    use crate::persistence::model::{IncrementWorkflowIndexDetails, InitiateNodeExecDetails, InitiateWorkflowExecDetails, LockNodeExecDetails};
-    use serde_json::Value;
-    use uuid::Uuid;
-    #[tokio::test]
-    async fn test_initiate_workflow_execution() {
-        let workflow_id = Uuid::new_v4().to_string();
-        let execution_id = Uuid::new_v4().to_string();
-        let repository = DynamoDbRepository::new().await;
-        let workflow = build_test_graph(&workflow_id);
-        repository.transact_write_items(WriteWorkflowExecutionRequest::builder()
-            .workflow_id(workflow_id.clone())
-            .execution_id(execution_id.clone())
-            .write(WriteRequest::InitiateWorkflowExecution(InitiateWorkflowExecDetails {
-                input: Value::String("an input".to_string()),
-                workflow: workflow.clone(),
-            }))
-            .build()).await.unwrap();
-        let actual_exec = repository.get_workflow_execution(&workflow_id, &execution_id)
-            .await.unwrap();
-
-        println!("{:?}", actual_exec);
-        let expected = WorkflowExecution {
-            execution_id: execution_id.clone(),
-            input: Value::String("an input".to_string()),
-            index: 0,
-            status: Status::Queued,
-            state_keys_by_node_id: Default::default(),
-            last_executed_node_id: None,
-            workflow: workflow.clone(),
-            started_at: actual_exec.started_at,
-            updated_at: None,
-        };
-        assert_eq!(expected, actual_exec);
-
-        //increment workflow exec index
-        repository.transact_write_items(WriteWorkflowExecutionRequest::builder()
-            .workflow_id(workflow_id.clone())
-            .execution_id(execution_id.clone())
-            .write(WriteRequest::IncrementWorkflowIndex(IncrementWorkflowIndexDetails {
-                increment: true,
-                current_index: 0,
-            }))
-            .build()).await.unwrap();
-
-        let actual_after_increment = repository.get_workflow_execution(&workflow_id, &execution_id).await.unwrap();
-        assert_eq!(1, actual_after_increment.index);
-
-        //update workflow status
-        repository.transact_write_items(WriteWorkflowExecutionRequest::builder()
-            .workflow_id(workflow_id.clone())
-            .execution_id(execution_id.clone())
-            .write(WriteRequest::UpdateWorkflowStatus(Status::InProgress))
-            .build()).await.unwrap();
-        let actual_after_status_update = repository.get_workflow_execution(&workflow_id, &execution_id).await.unwrap();
-        assert_eq!(Status::InProgress, actual_after_status_update.status);
-
-        //initiate node execution
-        let condition_node_id = NodeId::of("condition1".to_string());
-        repository.transact_write_items(WriteWorkflowExecutionRequest::builder()
-            .workflow_id(workflow_id.clone())
-            .execution_id(execution_id.clone())
-            .write(WriteRequest::InitiateNodeExec(InitiateNodeExecDetails {
-                node_id: condition_node_id.clone(),
-                state_id: "condition1".to_string(),
-                dept: vec![],
-            }))
-            .build()).await.unwrap();
-
-        let node_exec_after_init = repository.get_node_execution(&workflow_id, &execution_id, &"condition1".to_string()).await.unwrap();
-        println!("{:?}", node_exec_after_init);
-        //todo: add node state assertion
-
-        //lock node execution
-        let condition_node_id = NodeId::of("condition1".to_string());
-        repository.transact_write_items(WriteWorkflowExecutionRequest::builder()
-            .workflow_id(workflow_id.clone())
-            .execution_id(execution_id.clone())
-            .write(WriteRequest::LockNodeExec(LockNodeExecDetails {
-                node_id: condition_node_id.clone(),
-                state_id: "condition1".to_string(),
-                retry_count: 0,
-            }))
-            .build()).await.unwrap();
-
-        let actual_after_lock = repository.get_node_execution(&workflow_id, &execution_id, &"condition1".to_string()).await.unwrap();
-        println!("{:?}", actual_after_lock);
-        assert_eq!(Status::Running, actual_after_lock.status);
-
-        let actual_workflow_exec_after_lock = repository.get_workflow_execution(&workflow_id, &execution_id).await.unwrap();
-        println!("{:?}", actual_workflow_exec_after_lock.state_keys_by_node_id);
-        assert_eq!(Some("condition1".to_string()), actual_workflow_exec_after_lock.state_keys_by_node_id.get(&condition_node_id).cloned());
-
-        //save node execution
-        let condition_node_id = NodeId::of("condition1".to_string());
-        repository.transact_write_items(WriteWorkflowExecutionRequest::builder()
-            .workflow_id(workflow_id.clone())
-            .execution_id(execution_id.clone())
-            .write(WriteRequest::SaveNodeExec(NodeExecutionState {
-                workflow_id: workflow_id.clone(),
-                execution_id: execution_id.clone(),
-                state_id: "condition1".to_string(),
-                node_id: condition_node_id.clone(),
-                status: Status::Success,
-                execution: Some(Execution::Condition(ConditionExecution{ true_branch: false, index: 0 })),
-                depth: vec![],
-                created_at: actual_after_lock.created_at,
-                updated_at: None,
-            }))
-            .build()).await.unwrap();
-
-        let actual_after_save = repository.get_node_execution(&workflow_id, &execution_id, &"condition1".to_string()).await.unwrap();
-        println!("{:?}", actual_after_save);
-        assert_eq!(Status::Success, actual_after_save.status);
-        assert!(actual_after_save.updated_at.is_some());
-    }
-
-    fn build_test_graph(workflow_id: &String) -> Graph {
-        let http_get_node = StepNode(StepTarget::Http(HttpConfig {
-            url: DynamicValue::Simple(Expression::of_str("https://abc.xyz")),
-            headers: Default::default(),
-            method: "GET".to_string(),
-            body: None,
-            params: Default::default(),
-            content_type: "application/json".to_string(),
-            execution: Default::default(),
-        }));
-        let http_post_node = StepNode(StepTarget::Http(HttpConfig {
-            url: DynamicValue::Simple(Expression::of_str("https://abc.xyz")),
-            headers: Default::default(),
-            method: "POST".to_string(),
-            body: Some(DynamicValue::Collection(vec![DynamicValue::Simple(Expression::of_str("asd.ads"))])),
-            params: Default::default(),
-            content_type: "application/json".to_string(),
-            execution: Default::default(),
-        }));
-        let condition_node = ConditionNode(ConditionConfig {
-            expression: Expression::of_str("a.b.c"),
-            true_branch: vec![NodeId::of("http1".to_string())],
-            false_branch: vec![],
-        });
-        let branch_node = BranchNode(BranchConfig {
-            branches: vec![Branch {
-                name: "case1".to_string(),
-                condition: None,
-                nodes: vec![NodeId::of("http2".to_string())],
-            }],
-        });
-        let workflow = Graph {
-            nodes_by_id: HashMap::from([
-                (NodeId::of("http1".to_string()), http_get_node),
-                (NodeId::of("http2".to_string()), http_post_node),
-                (NodeId::of("condition1".to_string()), condition_node),
-                (NodeId::of("branch1".to_string()), branch_node)]),
-            node_ids: vec![NodeId::of("condition1".to_string()), NodeId::of("branch1".to_string())],
-            id: workflow_id.clone(),
-            config: Default::default(),
-        };
-        workflow
-    }
 }

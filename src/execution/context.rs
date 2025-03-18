@@ -33,7 +33,7 @@ pub async fn build_context(repository: Arc<Repository>, workflow_execution: &Wor
         .map(|key| key.unwrap().clone())
         .collect();
     tracing::debug!("will build context with following state ids: {:?}", referred_state_ids);
-    let referred_node_states = repository.port
+    let referred_node_states = repository
         .get_node_executions(
             &workflow.id.clone(),
             &workflow_execution.execution_id,
@@ -52,7 +52,7 @@ pub async fn build_context(repository: Arc<Repository>, workflow_execution: &Wor
         let parent_state_id = workflow_execution.state_id_of_node(parent_node_id);
         let parent_node = workflow.get_node(parent_node_id).unwrap();
         if let NodeConfig::LoopNode(loop_config) = parent_node {
-            let loop_state = repository.port.get_node_execution(&workflow.id, &workflow_execution.execution_id, &parent_state_id)
+            let loop_state = repository.get_node_execution(&workflow.id, &workflow_execution.execution_id, &parent_state_id)
                 .await
                 .unwrap()
                 .unwrap();

@@ -1,20 +1,77 @@
 # IronFlow
 
-IronFlow is a durable workflow orchestration framework designed for developers who want to create, manage, and execute workflows with minimal friction. It simplifies the process of defining workflows and activities, providing high-performance execution, and handling retries, failures, and state transitions. IronFlow supports various execution environments like AWS Lambda, Cloudflare Workers, and custom endpoints.
+A **lightweight, durable workflow execution engine** designed for flexibility and scalability.  
+IronFlow can run **anywhere**, requiring only **two database tables** (one for workflow executions, one for node executions) and a **messaging queue**.
+
+It uses [JMESPath](https://jmespath.org) to efficiently pass data between workflow nodes.
 
 ---
 
-## Features
+## 🚀 Supported Tech Stacks
 
-- **Durable Workflows**: Build workflows that can handle complex, long-running tasks, with automatic state management and retries.
-- **Execution Flexibility**: Choose your execution target: AWS Lambda, Cloudflare Workers, or your custom endpoints.
-- **Minimal Developer Overhead**: IronFlow allows developers to define their workflows with minimal changes to their existing code.
-- **Fault Tolerance & Retry Logic**: Includes built-in support for retries and error handling in workflows.
-- **Integration with AWS**: Easily integrate with AWS services like DynamoDB Streams, SQS, and Lambda functions.
-- **Open Source**: IronFlow is open-source, and contributions are welcome.
+### **Persistence**
+- ✅ AWS DynamoDB
+- 🔄 PostgreSQL *(coming soon)*
+
+### **Queue**
+- ✅ AWS SQS
+- 🔄 RabbitMQ *(coming soon)*
 
 ---
 
-## Getting Started
+## ✨ Features
 
-To get started with IronFlow, you can either deploy it using AWS, Cloudflare Workers, or self-host it using Docker. Below are the steps to set it up for both environments.
+- **🔄 Durable Workflows** – Handle complex, long-running tasks with built-in state management and retries.
+- **⚡ Execution Flexibility** – Deploy **anywhere** using your preferred database and queue system.
+- **🛠 Fault Tolerance & Retry Logic** – Automatic retries and error handling for reliable execution.
+- **☁️ AWS Integration** – Supports **DynamoDB Streams, SQS, and AWS Lambda** for seamless cloud-based workflows.
+- **💡 Open Source** – Actively maintained, and **contributions are welcome!**
+
+---
+
+## 🧩 Supported Workflow Nodes
+
+- **HTTP** – Send HTTP requests to external services.
+- **Lambda** – Invoke AWS Lambda functions.
+- **Condition** – Implement **if/else** branching logic.
+- **Branch** – Execute parallel tasks with optional conditions.
+- **Loop** – Run a set of nodes in a loop for iterative processing.
+- **Workflow** – Trigger **chained workflow executions** for modular design.
+---
+
+## Basic Architecture
+
+```mermaid
+graph TD;
+    DB[Database]
+    IronFlow
+    Queue
+    Stream
+    Dev[Developer]
+    
+    Dev -->|1️⃣ Triggers Workflow| IronFlow
+    IronFlow -->|2️⃣ Executes Step| IronFlow
+    IronFlow -->|3️⃣ Saves Execution Result| DB
+    DB -->|4️⃣ Writes to Stream| Stream
+    Stream --> |5️⃣ Pushes Event| Queue
+    IronFlow -->|6️⃣ Polls Queue| Queue
+    Queue -->|7️⃣ Delivers Task| IronFlow
+    IronFlow -->|2️⃣ , 8️⃣ Executes Next Step| IronFlow
+    IronFlow -->|9️⃣ Saves Final Result| DB
+```
+
+---
+
+### 📌 Get Started
+
+🔹 Coming soon: **Installation Guide & Examples**
+
+👥 Join the community & contribute: **[GitHub Repository](#)**
+
+🚀 **IronFlow – Build Durable, Scalable Workflows!**
+
+### AWS Integration
+ 1. Deploy cloudformation stack located in [ironflow.yaml](https://github.com/ErenKizilay/ironflow/blob/main/.cloudformation/ironflow.yaml).
+ 2. Deploy Lambda function [ironflow_dynamodb_streams](https://github.com/ErenKizilay/ironflow_dynamodb_streams) to route DynamoDB records to SQS
+ 3. Add ironflow_node_executions table as event trigger for ironflow_dynamodb_streams lambda function
+
