@@ -12,17 +12,18 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tracing::trace;
-use crate::config::configuration::ListenerConfig;
+use crate::config::configuration::{ListenerConfig, PersistenceProvider};
 use crate::listener::queue::QueuePort;
 
 pub struct SqsAdapter {
     sqs_client: Arc<Client>,
     queue_url: String,
-    listener_config: ListenerConfig
+    listener_config: ListenerConfig,
+    persistence_provider: PersistenceProvider,
 }
 
 impl SqsAdapter {
-    pub(crate) async fn new(listener_config: ListenerConfig, queue_name: String) -> Arc<SqsAdapter> {
+    pub(crate) async fn new(persistence_provider: PersistenceProvider, listener_config: ListenerConfig, queue_name: String) -> Arc<SqsAdapter> {
         let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
         let client = Client::new(&config);
         let queue_url = client.list_queues()
@@ -35,6 +36,7 @@ impl SqsAdapter {
                 sqs_client: Arc::new(client),
                 queue_url: queue_url,
                 listener_config,
+                persistence_provider,
             }
         )
     }
@@ -47,7 +49,7 @@ impl QueuePort for SqsAdapter {
         let result = self.sqs_client.receive_message()
             .queue_url(&self.queue_url)
             .max_number_of_messages(10)
-            .visibility_timeout(self.listener_config.message_visibility_timeout.as_secs() as i32)
+            .visibility_timeout(self.listener_config.message_visibility_timeout_sec as i32)
             .send().await;
         match result {
             Ok(message_output) => {
@@ -55,13 +57,20 @@ impl QueuePort for SqsAdapter {
                 messages.iter()
                     .map(|sqs_message| {
                         let message_body = sqs_message.clone().body.unwrap();
-                        let item: Item = serde_json::from_str(message_body.as_ref())
-                            .expect("expected to deserialize DynamoDB JSON format");
-                        let node_exec_state: NodeExecutionState = from_item(item.clone())
-                            .expect(format!("expected NodeExecutionState in DynamoDB JSON format, got {:?}", item).as_str());
-                        Message {
-                            node_execution_state: node_exec_state,
-                            id: sqs_message.clone().receipt_handle.unwrap(),
+                        match self.persistence_provider {
+                            PersistenceProvider::DynamoDb => {
+                                let item: Item = serde_json::from_str(message_body.as_ref())
+                                    .expect("expected to deserialize DynamoDB JSON format");
+                                let node_exec_state: NodeExecutionState = from_item(item.clone())
+                                    .expect(format!("expected NodeExecutionState in DynamoDB JSON format, got {:?}", item).as_str());
+                                Message {
+                                    node_execution_state: node_exec_state,
+                                    id: sqs_message.clone().receipt_handle.unwrap(),
+                                }
+                            }
+                            PersistenceProvider::InMemory => {
+                                unreachable!();
+                            }
                         }
                     }).collect()
             }

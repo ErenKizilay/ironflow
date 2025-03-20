@@ -3,7 +3,7 @@ use crate::execution::model::Execution::Condition;
 use crate::execution::model::{ConditionExecution, Execution, NodeExecutionState, Status};
 use crate::model::{ConditionConfig, NodeConfig};
 use crate::persistence::model::{IncrementConditionIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest};
-use crate::persistence::persistence::{Repository};
+use crate::persistence::persistence::{PersistenceError, Repository};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,7 +20,7 @@ pub async fn initiate_execution(condition_config: &ConditionConfig, context: &Va
     )
 }
 
-pub async fn continue_execution(repository: Arc<Repository>, command: ContinueParentNodeExecutionCommand) {
+pub async fn continue_execution(repository: Arc<Repository>, command: ContinueParentNodeExecutionCommand) -> Result<(), PersistenceError> {
     let workflow_execution = command.workflow_execution;
     let parent_state = command.parent_state;
     let workflow = workflow_execution.workflow.clone();
@@ -31,7 +31,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
             if let Some(Condition(ref condition_exec)) = parent_state.execution {
                 if command.child_state.is_none() && condition_exec.index > 0 {
                     tracing::info!("Condition[{}] execution is already started", parent_state.node_id.name);
-                    return;
+                    return Ok(());
                 }
                 let child_nodes = if condition_exec.true_branch {
                     condition_config.true_branch.clone()
@@ -52,7 +52,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                 }))
                                 .build(),
                         )
-                        .await;
+                        .await
                 } else {
                     let child_node_id = child_nodes.get(condition_exec.index).unwrap();
                     let child_state_id =
@@ -77,8 +77,10 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                 }))
                                 .build(),
                         )
-                        .await;
+                        .await
                 }
+            } else {
+                Ok(())
             }
         }
         _ => {

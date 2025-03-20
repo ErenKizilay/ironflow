@@ -3,12 +3,13 @@ use crate::auth::http::HttpAuthentication;
 use crate::auth::provider::AuthProvider;
 use crate::config::configuration::{ConfigOptions, ConfigurationManager, IronFlowConfig};
 use crate::execution::execution::WorkflowExecutor;
-use crate::in_memory::adapters::{in_memory_persistence};
+use crate::in_memory::adapters::in_memory_persistence;
 use crate::listener::listener::{Listener, Message};
 use crate::model::Graph;
-use crate::persistence::persistence::{Repository};
+use crate::persistence::persistence::Repository;
+use crate::persistence::persistence::{PersistenceError::Internal, PersistenceError::RaceCondition};
 use crate::secret::secrets::SecretManager;
-use crate::yaml::yaml::{from_yaml, from_yaml_to_auth};
+use crate::yaml::yaml::{from_yaml_file, from_yaml_file_to_auth};
 use axum::extract::DefaultBodyLimit;
 use axum::Router;
 use serde_json::Value;
@@ -44,16 +45,15 @@ impl IronFlow {
     pub async fn run(iron_flow_config: IronFlowConfig) {
         let (shutdown_tx, shutdown_rx) = watch::channel(false); // Watch channel for shutdown signal
         let (poll_tx, poll_rx) = watch::channel(SystemTime::now()); // Watch channel for polling signal
-        let (task_sender, mut task_receiver) = mpsc::channel(32); // message channel
-        let (task_deletion_sender, mut task_deletion_receiver) = mpsc::channel(32); // message deletion channel
-        let configuration_manager = ConfigurationManager::new(iron_flow_config.clone());
-        let repository = Arc::new(Repository::new(iron_flow_config.persistence_config).await);
+        let (task_sender, mut task_receiver) = mpsc::channel(1000); // message channel
+        let (task_deletion_sender, mut task_deletion_receiver) = mpsc::channel(1000); // message deletion channel
         let secret_manager = SecretManager::new();
+        let configuration_manager = ConfigurationManager::new(iron_flow_config.clone(), secret_manager.clone()).await;
+        let repository = Arc::new(Repository::new(iron_flow_config.persistence_config.clone()).await);
         let auth_provider = Arc::new(AuthProvider::new(
             secret_manager,
             configuration_manager.clone(),
         ));
-        configuration_manager.write().await.load().await;
         let workflow_executor = Arc::new(
             WorkflowExecutor::new(
                 iron_flow_config.execution_config.clone(),
@@ -66,6 +66,7 @@ impl IronFlow {
         );
         let listener = Arc::new(
             Listener::new(
+                iron_flow_config.persistence_config.provider.clone(),
                 iron_flow_config.lister_config.clone(),
                 shutdown_rx.clone(),
                 task_sender,
@@ -89,9 +90,25 @@ impl IronFlow {
                         let continue_result = wf_executor_cloned.continue_execution(&message.node_execution_state).await;
                         match continue_result {
                             Ok(_) => {
-                                 task_deletion_sender_cloned.send(message.id).await.unwrap();
+                                let send_result = task_deletion_sender_cloned.send(message.id).await;
+                                match send_result {
+                                    Ok(_) => {}
+                                    Err(_) => {
+                                        tracing::warn!("Will stop continue execution since shutdown signal received");
+                                        break;
+                                    }
+                                }
                             }
-                            Err(_) => {}
+                            Err(continue_result) => {
+                                match continue_result {
+                                    RaceCondition(_) => {
+                                        tracing::warn!("Will discard execution since another thread is working on it.");
+                                    }
+                                    Internal(err) => {
+                                        tracing::error!("Execution error occurred will retry: {}", err);
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -121,6 +138,7 @@ impl IronFlow {
         poll_tx.send(SystemTime::now()).unwrap();
         let routes = build_routes(ApiState {
             workflow_executor: workflow_executor.clone(),
+            configuration_manager: configuration_manager.clone(),
             repository: repository.clone(),
         })
         .await;

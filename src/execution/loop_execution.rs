@@ -2,7 +2,7 @@ use crate::execution::model::Execution::Loop;
 use crate::execution::model::{ContinueParentNodeExecutionCommand, Execution, LoopExecution, Status};
 use crate::model::{LoopConfig, NodeConfig};
 use crate::persistence::model::{IncrementLoopIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, WriteRequest, WriteWorkflowExecutionRequest};
-use crate::persistence::persistence::Repository;
+use crate::persistence::persistence::{PersistenceError, Repository};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ pub async fn initiate_execution(loop_config: &LoopConfig, context: &Value) -> (S
     }
 }
 
-pub async fn continue_execution(repository: Arc<Repository>, command: ContinueParentNodeExecutionCommand) {
+pub async fn continue_execution(repository: Arc<Repository>, command: ContinueParentNodeExecutionCommand) -> Result<(), PersistenceError> {
     let parent_state = command.parent_state;
     let workflow_execution = command.workflow_execution;
     let workflow = workflow_execution.workflow.clone();
@@ -49,7 +49,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                     state_id: parent_state_id.clone(),
                                     status: Status::Success,
                                 }))
-                                .build()).await.unwrap();
+                                .build()).await
                         }
                         else {
                             let mut path_so_far = parent_state.depth.clone();
@@ -63,7 +63,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                     state_id: format!("{}_{}", child_node_to_queue.name, loop_execution.iteration_count),
                                     dept: path_so_far,
                                 }))
-                                .build()).await.unwrap();
+                                .build()).await
                         }
                     }
                     Some(child_state) => {
@@ -76,9 +76,11 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                 next_index: get_next_index(&loop_config, loop_execution),
                                 iteration_count: get_iteration_count(&loop_config, loop_execution),
                             }))
-                            .build()).await.unwrap();
+                            .build()).await
                     }
                 }
+            } else {
+                unreachable!()
             }
         }
         _ => {

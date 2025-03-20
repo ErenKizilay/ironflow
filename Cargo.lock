@@ -1667,6 +1667,7 @@ dependencies = [
  "bon",
  "clap",
  "jmespath",
+ "lazy_static",
  "reqwest",
  "serde",
  "serde_dynamo",

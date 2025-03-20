@@ -22,10 +22,10 @@ mod tests {
             ConfigOptions::builder()
                 .workflow_source(ConfigSource::Local("resources/workflows".to_string()))
                 .auth_provider_source(ConfigSource::Local("resources/auth.yaml".to_string()))
+                .refresh_interval_secs(600)
                 .build(),
-        ));
+        ), SecretManager::new()).await;
 
-        configuration_manager.write().await.load().await;
         let (tx, rx) = watch::channel(SystemTime::now());
         let repository = Arc::new(Repository::new(PersistenceConfig {
             provider: PersistenceProvider::InMemory,
@@ -51,6 +51,7 @@ mod tests {
             .source(ExecutionSource::Manual)
             .dept_so_far(vec![])
             .build()).await;
+        println!("{:?}", start_result);
         assert!(start_result.is_ok());
 
         let workflow_execution = repository.get_workflow_execution(&workflow_id, &execution_id).await

@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct StepExecutor {
     http_client: Arc<HttpClient>,
     lambda_client: Arc<LambdaClient>,

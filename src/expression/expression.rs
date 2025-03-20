@@ -1,7 +1,10 @@
+use crate::expression::custom_functions::{base64_decode, base64_encode, capitalize, concat, now, split, uuid};
 use crate::model::NodeId;
-use jmespath::{Rcvar, Variable};
+use jmespath::functions::{ArgumentType, CustomFunction, Signature};
+use jmespath::{JmespathError, Rcvar, Runtime, Variable, DEFAULT_RUNTIME};
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Number, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
@@ -17,6 +20,26 @@ pub enum DynamicValue {
     Collection(Vec<DynamicValue>),
     Map(HashMap<String, DynamicValue>),
 }
+
+
+
+lazy_static! {
+    pub static ref CUSTOM_RUNTIME: Runtime = {
+        let mut runtime = Runtime::new();
+        runtime.register_builtin_functions();
+        runtime.register_function("base64_encode", Box::new(base64_encode()));
+        runtime.register_function("base64_decode", Box::new(base64_decode()));
+        runtime.register_function("capitalize", Box::new(capitalize()));
+        runtime.register_function("now", Box::new(now()));
+        runtime.register_function("uuid", Box::new(uuid()));
+        runtime.register_function("concat", Box::new(concat()));
+        runtime.register_function("split", Box::new(split()));
+        runtime
+    };
+}
+
+
+
 
 impl DynamicValue {
 
@@ -76,7 +99,7 @@ impl Expression {
         match &self.value {
             None => {
                 let path = self.path.clone();
-                let compilation_result = jmespath::compile(path.unwrap().as_str());
+                let compilation_result = compile(path.unwrap().as_str());
                 match compilation_result {
                     Ok(expr) => {
                         let context_json = serde_json::to_string(&context).unwrap();
@@ -146,12 +169,19 @@ pub fn value_as_string(value: Value) -> String {
         .to_string()
 }
 
+fn compile(expression: &str) -> Result<jmespath::Expression<'static>, JmespathError> {
+    CUSTOM_RUNTIME.compile(expression)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::expression::expression::{DynamicValue, Expression};
     use crate::model::NodeId;
+    use aws_sdk_dynamodb::primitives::DateTime;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::str::FromStr;
+    use std::time::SystemTime;
 
     #[test]
     fn test_to_json_value() {
@@ -183,6 +213,50 @@ mod tests {
         let expected = r#"{"k1":"hardcoded","k2":{"baz":true},"k3":[true]}"#;
         assert_eq!(expected, result.to_string());
         assert!(result.is_object())
+    }
+
+    #[test]
+    fn test_encode() {
+        let context = json!({"foo": {"bar": {"baz": "hardcoded"}}});
+        let encode_expr = DynamicValue::Simple(Expression::of_str("base64_encode(foo.bar.baz)"));
+        let decode_expr = DynamicValue::Simple(Expression::of_str("base64_decode(base64_encode(foo.bar.baz))"));
+        let result = decode_expr.resolve(context);
+
+        println!("result: {}", result);
+        assert_eq!("hardcoded", result.as_str().unwrap());
+    }
+
+    #[test]
+    fn test_capitalize() {
+        let context = json!({"foo": {"bar": {"baz": "hardcoded"}}});
+        let expr = DynamicValue::Simple(Expression::of_str("capitalize(foo.bar.baz)"));
+        let result = expr.resolve(context);
+
+        println!("result: {}", result);
+        assert_eq!("HARDCODED", result.as_str().unwrap());
+    }
+
+    #[test]
+    fn test_now() {
+        let context = json!({"foo": {"bar": {"baz": "hardcoded"}}});
+        let expr = DynamicValue::Simple(Expression::of_str("now()"));
+        let result = expr.resolve(context);
+
+        println!("result: {}", result);
+        let now_millis = DateTime::from(SystemTime::now()).to_millis().unwrap();
+        let diff = now_millis - result.as_number().unwrap().as_i64().unwrap();
+        assert!(diff < 1000);
+    }
+
+    #[test]
+    fn test_uuid() {
+        let context = json!({"foo": {"bar": {"baz": "hardcoded"}}});
+        let expr = DynamicValue::Simple(Expression::of_str("uuid()"));
+        let result = expr.resolve(context);
+
+        println!("result: {}", result);
+        let uuid = uuid::Uuid::from_str(result.to_string().trim_matches('"').to_string().as_str()).unwrap();
+        println!("uuid: {}", uuid);
     }
 
 }

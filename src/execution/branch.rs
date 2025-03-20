@@ -2,7 +2,7 @@ use crate::execution::model::ContinueParentNodeExecutionCommand;
 use crate::execution::model::{BranchExecution, Execution, NodeExecutionState, Status};
 use crate::model::{Branch, BranchConfig, ConditionConfig, NodeId};
 use crate::persistence::model::{IncrementBranchIndexDetails, IncrementWorkflowIndexDetails, InitiateNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest, WriteWorkflowExecutionRequest};
-use crate::persistence::persistence::{Repository};
+use crate::persistence::persistence::{PersistenceError, Repository};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ pub async fn initiate_execution(branch_config: &BranchConfig, context: &Value) -
     )
 }
 
-pub async fn continue_execution(repository: Arc<Repository>, command: ContinueParentNodeExecutionCommand) {
+pub async fn continue_execution(repository: Arc<Repository>, command: ContinueParentNodeExecutionCommand) -> Result<(), PersistenceError> {
     let parent_state = command.parent_state;
     let workflow_execution = command.workflow_execution;
     let workflow = workflow_execution.workflow.clone();
@@ -47,7 +47,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                 None => {
                     if branch_exec.branch_index.values().into_iter().any(|size|size.gt(&0))  {
                         tracing::info!("Branch[{}] execution is already started", parent_state.node_id.name);
-                        return;
+                        return Ok(());
                     }
                     let queued_executions: Vec<WriteRequest> = branch_exec
                         .branch_index
@@ -71,7 +71,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                             .execution_id(workflow_execution.execution_id.clone())
                             .writes(queued_executions)
                             .build())
-                        .await;
+                        .await
                 }
                 Some(child_state) => {
                     let must_finish_branch_exec =
@@ -90,7 +90,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                     state_id: parent_state_id.clone(),
                                     status: Status::Success,
                                 }))
-                                .build()).await;
+                                .build()).await
                     } else {
                         let branch = branch_node
                             .branches
@@ -101,6 +101,7 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                         let mut branch_indexes = branch_exec.branch_index.clone();
                         if branch_index.clone() == branch.nodes.len() - 1 {
                             tracing::info!("Branch[{}] execution over!", branch.name);
+                            Ok(())
                         } else {
                             branch_indexes.insert(branch.name.clone(), branch_index + 1);
                             let next_node_id = branch.nodes.get(branch_index.clone()).unwrap();
@@ -122,11 +123,15 @@ pub async fn continue_execution(repository: Arc<Repository>, command: ContinuePa
                                         dept: path_so_far,
                                     }))
                                     .build())
-                                .await;
+                                .await
                         }
                     }
                 }
             }
+        } else {
+            Ok(())
         }
+    } else {
+        Ok(())
     }
 }
