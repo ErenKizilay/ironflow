@@ -21,12 +21,13 @@ use crate::persistence::model::{
     LockNodeExecDetails, UpdateNodeStatusDetails, UpdateWorkflowExecutionRequest, WriteRequest,
     WriteWorkflowExecutionRequest, WriteWorkflowExecutionRequestBuilder,
 };
-use crate::persistence::persistence::Repository;
+use crate::persistence::persistence::{PersistenceError, Repository};
 use bon::Builder;
 use jmespath::functions::Function;
 use serde_json::Value::Object;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -34,13 +35,14 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::watch::Sender;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::task::TaskTracker;
-use tracing::{span, Level};
+use tracing::{instrument, span, Level};
 use tracing_subscriber::fmt::format;
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct WorkflowExecutor {
     execution_config: ExecutionConfig,
-    configuration_manager: Arc<RwLock<ConfigurationManager>>,
+    configuration_manager: Arc<ConfigurationManager>,
     repository: Arc<Repository>,
     step_executor: Arc<StepExecutor>,
     poll_sender: Sender<SystemTime>,
@@ -49,7 +51,7 @@ pub struct WorkflowExecutor {
 impl WorkflowExecutor {
     pub async fn new(
         execution_config: ExecutionConfig,
-        configuration_manager: Arc<RwLock<ConfigurationManager>>,
+        configuration_manager: Arc<ConfigurationManager>,
         repository: Arc<Repository>,
         auth_provider: Arc<AuthProvider>,
         poll_sender: Sender<SystemTime>,
@@ -66,9 +68,7 @@ impl WorkflowExecutor {
     pub async fn start(&self, command: StartWorkflowCommand) -> Result<String, String> {
         match self
             .configuration_manager
-            .read()
-            .await
-            .get_workflow(&command.workflow_id)
+            .get_workflow(&command.workflow_id).await
         {
             Some(workflow) => {
                 let workflow_id = &workflow.id;
@@ -106,10 +106,8 @@ impl WorkflowExecutor {
         }
     }
 
-    //#[tracing::instrument]
-    pub async fn continue_execution(&self, state: &NodeExecutionState) -> Result<(), String> {
-        let span = span!(Level::INFO, "workflow_execution", state.workflow_id, state.execution_id);
-        let _enter = span.enter();
+    #[instrument(level = "info", skip(self), fields(workflow_id = state.workflow_id, execution_id = state.execution_id))]
+    pub async fn continue_execution(&self, state: &NodeExecutionState) -> Result<(), PersistenceError> {
         let workflow_execution = self
             .repository
             .get_workflow_execution(&state.workflow_id, &state.execution_id)
@@ -131,12 +129,13 @@ impl WorkflowExecutor {
         );
         match status {
             Status::Queued | Status::WillRetried => {
-                self.handle_queued_and_retry(state, &workflow_execution, graph)
+                let exec_result = self.handle_queued_and_retry(state, &workflow_execution, graph)
                     .await;
                 self.poll_sender.send(SystemTime::now()).unwrap();
+                exec_result
             }
             Status::Success => {
-                self.handle_success(state, &workflow_execution, graph).await;
+                self.handle_success(state, &workflow_execution, graph).await
             }
             Status::InProgress => match execution.clone().unwrap() {
                 Execution::Step(_) => {
@@ -144,7 +143,7 @@ impl WorkflowExecutor {
                 }
                 _ => {
                     self.continue_parent_node_exec(&workflow_execution, state, false)
-                        .await;
+                        .await
                 }
             },
             Status::Failure => {
@@ -166,11 +165,10 @@ impl WorkflowExecutor {
                             .build(),
                     )
                     .await
-                    .unwrap();
-                tracing::info!("Workflow[{}] execution failed", graph.id);
             }
             Status::Running => {
                 tracing::debug!("Running node: {:?}", state.node_id.name);
+                Ok(())
             }
         };
         Ok(())
@@ -181,7 +179,7 @@ impl WorkflowExecutor {
         state: &NodeExecutionState,
         workflow_execution: &WorkflowExecution,
         graph: &Graph,
-    ) {
+    ) -> Result<(), PersistenceError> {
         let mut write_requests = Vec::new();
         if state.depth.is_empty() {
             let next_index = workflow_execution.index + 1;
@@ -233,10 +231,9 @@ impl WorkflowExecutor {
                         .build(),
                 )
                 .await
-                .unwrap();
         } else {
             self.continue_parent_node_exec(&workflow_execution, state, true)
-                .await;
+                .await
         }
     }
 
@@ -245,7 +242,7 @@ impl WorkflowExecutor {
         state: &NodeExecutionState,
         workflow_execution: &WorkflowExecution,
         graph: &Graph,
-    ) {
+    ) -> Result<(), PersistenceError> {
         let state_id = state.state_id.clone();
         let retry_count = resolve_retry_count(state);
         self.repository
@@ -280,7 +277,6 @@ impl WorkflowExecutor {
                     .build(),
             )
             .await
-            .unwrap();
     }
 
     async fn continue_parent_node_exec(
@@ -288,7 +284,7 @@ impl WorkflowExecutor {
         workflow_execution: &WorkflowExecution,
         state: &NodeExecutionState,
         is_triggerred_by_child: bool,
-    ) {
+    ) -> Result<(), PersistenceError> {
         let graph = &workflow_execution.workflow;
         let parent_state = if is_triggerred_by_child {
             let parent_node_id = &state.depth.last().unwrap().clone();
@@ -323,21 +319,24 @@ impl WorkflowExecutor {
                 }
                 Execution::Loop(_) => {
                     loop_execution::continue_execution(self.repository.clone(), continue_command)
-                        .await;
+                        .await
                 }
                 Execution::Branch(_) => {
-                    branch::continue_execution(self.repository.clone(), continue_command).await;
+                    branch::continue_execution(self.repository.clone(), continue_command).await
                 }
                 Condition(_) => {
-                    condition::continue_execution(self.repository.clone(), continue_command).await;
+                    condition::continue_execution(self.repository.clone(), continue_command).await
                 }
                 Execution::Workflow(workflow_execution_identifier) => {
                     tracing::info!(
                         "Chain Workflow[{:?}] execution is in progress",
                         workflow_execution_identifier
                     );
+                    Ok(())
                 }
             }
+        } else {
+            Ok(())
         }
     }
 

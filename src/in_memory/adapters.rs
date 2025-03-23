@@ -37,6 +37,7 @@ pub struct InMemoryQueueAdapter {
 }
 
 
+#[derive(Debug)]
 pub struct InMemoryRepositoryAdapter  {
     sender: mpsc::Sender<NodeExecutionState>,
     node_table: NodeExecutionsTable,

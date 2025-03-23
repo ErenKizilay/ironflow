@@ -1,8 +1,10 @@
+use crate::config::configuration::ConfigurationManager;
 use crate::execution::execution::WorkflowExecutor;
 use crate::execution::model::{ExecutionSource, StartWorkflowCommand, WorkflowExecution};
 use crate::persistence::persistence::Repository;
+use crate::yaml::yaml::{from_yaml, from_yaml_to_auth};
 use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use axum_macros::debug_handler;
 use bon::Builder;
@@ -17,6 +19,7 @@ use tracing::Level;
 #[derive(Clone)]
 pub struct ApiState {
     pub(crate) workflow_executor: Arc<WorkflowExecutor>,
+    pub(crate) configuration_manager: Arc<ConfigurationManager>,
     pub(crate) repository: Arc<Repository>,
 }
 
@@ -30,6 +33,8 @@ pub async fn build_routes(app_state: ApiState) -> Router {
         .route("/workflows/{workflow_id}/executions/{execution_id}", post(run_workflow_with_execution_id))
         .route("/workflows/{workflow_id}/executions", post(run_workflow))
         .route("/workflows/{workflow_id}/executions/{execution_id}", get(get_workflow_exec))
+        .route("/workflows", put(put_workflow))
+        .route("/auth-providers", put(put_auth_provider))
         .layer(cors)
         .layer(DefaultBodyLimit::max(90003944))
         .layer(TraceLayer::new_for_http()
@@ -120,8 +125,54 @@ async fn get_workflow_exec(
     }
 }
 
+#[debug_handler]
+async fn put_workflow(
+    State(app_state): State<ApiState>,
+    yaml: String,
+) -> Result<Json<PutConfigResponse>, String> {
+    let result = from_yaml(&yaml);
+    match result {
+        Ok(workflow) => {
+            let workflow_id = &workflow.id.clone();
+            app_state.configuration_manager.register_workflow(workflow).await;
+            Ok(Json(PutConfigResponse {
+                message: format!("workflow[{}] successfully registered", workflow_id),
+            }))
+        }
+        Err(err) => {
+            return Err(err.to_string());
+        }
+    }
+}
+
+#[debug_handler]
+async fn put_auth_provider(
+    State(app_state): State<ApiState>,
+    yaml: String,
+) -> Result<Json<PutConfigResponse>, String> {
+    let result = from_yaml_to_auth(&yaml);
+    match result {
+        Ok(auth_provider_details) => {
+            for auth_provider in auth_provider_details.providers {
+                app_state.configuration_manager.register_auth_provider(auth_provider).await;
+            }
+            Ok(Json(PutConfigResponse {
+                message: "Auth providers successfully registered".to_string(),
+            }))
+        }
+        Err(err) => {
+            return Err(err.to_string());
+        }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Clone, Debug, Builder)]
 pub struct RunWorkflowResponse {
     execution_id: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Builder)]
+pub struct PutConfigResponse {
+    message: String,
 }

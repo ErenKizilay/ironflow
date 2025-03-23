@@ -25,6 +25,7 @@ use tracing::error;
 use tracing_subscriber::fmt::format;
 use crate::persistence::persistence::{PersistenceError, PersistencePort};
 
+#[derive(Debug)]
 pub struct DynamoDbRepository {
     client: Arc<Client>,
 }
@@ -43,7 +44,33 @@ impl PersistencePort for DynamoDbRepository {
         match aws_result {
             Ok(_) => Ok(()),
             Err(err) => {
-                Err(PersistenceError::ConditionFailure(err.to_string()))
+                let err_message = err.to_string();
+                match err.into_service_error() {
+                    TransactWriteItemsError::TransactionCanceledException(transaction_cancelled_ex) => {
+                        transaction_cancelled_ex.cancellation_reasons
+                            .map_or_else(|| Err(PersistenceError::Internal(err_message.clone())), |reasons| {
+                                let conditional_check_failed = reasons.iter()
+                                    .filter(|reason| {
+                                        reason.code.clone()
+                                            .unwrap_or_else(|| "".to_string()).contains("ConditionalCheckFailed")
+                                    })
+                                    .next().is_some();
+                                if conditional_check_failed {
+                                    Err(PersistenceError::RaceCondition(err_message.clone()))
+                                } else {
+                                    Err(PersistenceError::Internal(err_message.clone()))
+                                }
+                            })
+
+                    }
+                    TransactWriteItemsError::TransactionInProgressException(_) => {
+                        Err(PersistenceError::RaceCondition(err_message))
+                    }
+                    _ => {
+                        Err(PersistenceError::RaceCondition(err_message))
+                    }
+                }
+
             }
         }
     }

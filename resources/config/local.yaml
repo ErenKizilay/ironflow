@@ -1,0 +1,15 @@
+config_options:
+  auth_provider_source: !Local
+    resources/auth.yaml
+  workflow_source: !Local
+    resources/workflows
+lister_config:
+  poll_interval_ms: 300
+  queue_provider: InMemory  # Replace with the actual queue provider
+  message_visibility_timeout_sec: 60  # Example: message visibility timeout of 60 seconds
+persistence_config:
+  provider: InMemory  # Replace with the persistence provider you use (e.g., DynamoDB, PostgreSQL)
+execution_config:
+  max_workflow_chain_depth: 10  # Set the max depth for workflow chains
+api_config:
+  port: 3000  # Port where the API will run

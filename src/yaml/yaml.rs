@@ -321,47 +321,69 @@ fn traverse(node: NodeValue, configs: &mut Vec<Node>) {
     }
 }
 
-pub fn from_yaml_to_auth(file_name: &str) -> AuthProviderDetails {
+pub fn from_yaml_file_to_auth(file_name: &str) -> Result<AuthProviderDetails, String> {
     let mut file = File::open(file_name).unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    serde_yaml::from_str::<AuthProviderDetails>(&contents).unwrap()
+    from_yaml_to_auth(&mut contents)
 }
 
+pub fn from_yaml_to_auth(contents: &String) -> Result<AuthProviderDetails, String> {
+    let result = serde_yaml::from_str::<AuthProviderDetails>(&contents);
+    match result {
+        Ok(auth_provider_details) => {
+            Ok(auth_provider_details)
+        }
+        Err(err) => {
+            Err(err.to_string())
+        }
+    }
+}
 
-pub fn from_yaml(file_name: &str) -> Result<Graph, String> {
+pub fn from_yaml_file(file_name: &str) -> Result<Graph, String> {
     let mut file = File::open(file_name).unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    let workflow = serde_yaml::from_str::<Workflow>(&contents).unwrap();
-    let mut configs: Vec<Node> = vec![];
-    workflow.nodes.iter().for_each(|node| {
-        traverse(node.clone(), &mut configs);
-    });
-    let node_ids: HashSet<NodeId> = configs.to_vec()
-        .iter()
-        .map(|node| node.id.clone())
-        .collect();
+    from_yaml(&contents)
+}
 
-    if node_ids.len().ne(&configs.len()) {
-        return Err("All node ids must be unique".to_string());
-    }
+pub fn from_yaml(contents: &String) -> Result<Graph, String> {
+    let workflow_result = serde_yaml::from_str::<Workflow>(&contents);
+    match workflow_result {
+        Ok(workflow) => {
+            let mut configs: Vec<Node> = vec![];
+            workflow.nodes.iter().for_each(|node| {
+                traverse(node.clone(), &mut configs);
+            });
+            let node_ids: HashSet<NodeId> = configs.to_vec()
+                .iter()
+                .map(|node| node.id.clone())
+                .collect();
 
-    let graph: Graph = Graph {
-        nodes_by_id: configs
-            .iter()
-            .map(|config| (config.id.clone(), config.config.clone()))
-            .collect(),
-        node_ids: workflow.nodes.iter().map(|node| node.node_id()).collect(),
-        id: workflow.name,
-        config: match workflow.config {
-            None => {Default::default()}
-            Some(workflow_config) => {
-                workflow_config.merge()
+            if node_ids.len().ne(&configs.len()) {
+                return Err("All node ids must be unique".to_string());
             }
-        },
-    };
-    Ok(graph)
+
+            let graph: Graph = Graph {
+                nodes_by_id: configs
+                    .iter()
+                    .map(|config| (config.id.clone(), config.config.clone()))
+                    .collect(),
+                node_ids: workflow.nodes.iter().map(|node| node.node_id()).collect(),
+                id: workflow.name,
+                config: match workflow.config {
+                    None => { Default::default() }
+                    Some(workflow_config) => {
+                        workflow_config.merge()
+                    }
+                },
+            };
+            Ok(graph)
+        }
+        Err(err) => {
+            Err(err.to_string())
+        }
+    }
 }
 
 fn resolve_expression(from: YamlValue) -> Expression {
@@ -421,13 +443,13 @@ fn resolve_dynamic_json_value(json_value: JsonValue) -> DynamicValue {
 }
 #[cfg(test)]
 mod tests {
-    use crate::yaml::yaml::from_yaml;
+    use crate::yaml::yaml::from_yaml_file;
     #[test]
     fn test_from_yaml() {
-        from_yaml("resources/workflows/workflow.yaml").unwrap();
+        from_yaml_file("resources/workflows/workflow.yaml").unwrap();
     }
     #[test]
     fn test_from_yaml_og() {
-        from_yaml("resources/workflows/opsgenie.yaml").unwrap();
+        from_yaml_file("resources/workflows/opsgenie.yaml").unwrap();
     }
 }

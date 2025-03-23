@@ -6,6 +6,7 @@
       <sourceFolder url="file://$MODULE_DIR$/src/expression/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/dynamodb_streams/dynamo_streams/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/streams/dynamodb_streams/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/src/expression/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/dynamodb_streams/dynamo_streams/target" />

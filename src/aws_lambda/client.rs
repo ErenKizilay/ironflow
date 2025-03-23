@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::string::FromUtf8Error;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct LambdaClient {
     client: Client,
 }

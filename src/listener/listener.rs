@@ -1,5 +1,5 @@
 use crate::auth::http::HttpAuthentication;
-use crate::config::configuration::{ListenerConfig, QueueProvider};
+use crate::config::configuration::{ListenerConfig, PersistenceProvider, QueueProvider};
 use crate::engine::IronFlow;
 use crate::execution::execution::WorkflowExecutor;
 use crate::execution::model::NodeExecutionState;
@@ -35,6 +35,7 @@ pub struct Message {
 
 impl Listener {
     pub async fn new(
+        persistence_provider: PersistenceProvider,
         listener_config: ListenerConfig,
         shutdown_receiver: watch::Receiver<bool>,
         task_channel_sender: Sender<Message>,
@@ -49,7 +50,7 @@ impl Listener {
             queue_port: match listener_config.queue_provider {
                 QueueProvider::SQS => {
                     tracing::info!("Queue port: SQS");
-                    SqsAdapter::new(listener_config, "ironflow_node_executions".to_string())
+                    SqsAdapter::new(persistence_provider, listener_config, "ironflow_node_executions".to_string())
                         .await
                 }
                 QueueProvider::InMemory => {
@@ -71,8 +72,14 @@ impl Listener {
                     while SystemTime::now().duration_since(*poll_receiver.borrow_and_update()).unwrap().as_secs() < 5 {
                         let messages = self.queue_port.receive_messages().await;
                         for message in messages {
-                            self.task_channel_sender.send(message).await
-                            .unwrap();
+                            let send_result = self.task_channel_sender.send(message).await;
+                            match send_result {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    tracing::warn!("Will stop polling since shutdown signal received");
+                                    break;
+                                }
+                            }
                         }
                         tokio::time::sleep(Duration::from_millis(50)).await;
                     }
@@ -83,7 +90,7 @@ impl Listener {
                     break;
                 }
             }
-            tokio::time::sleep(self.listener_config.poll_interval).await
+            tokio::time::sleep(Duration::from_millis(self.listener_config.poll_interval_ms)).await
         }
     }
 

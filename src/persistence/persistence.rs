@@ -2,13 +2,13 @@ use crate::execution::model::{NodeExecutionState, WorkflowExecution};
 use crate::persistence::dynamodb::adapter::DynamoDbRepository;
 use crate::persistence::model::WriteWorkflowExecutionRequest;
 use async_trait::async_trait;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use crate::config::configuration::{PersistenceConfig, PersistenceProvider};
 use crate::in_memory::adapters::{in_memory_persistence, InMemoryRepositoryAdapter};
 
 #[async_trait]
-pub trait PersistencePort: Send + Sync {
+pub trait PersistencePort: Send + Sync + Debug {
     async fn write_workflow_execution(&self, request: WriteWorkflowExecutionRequest) -> Result<(), PersistenceError>;
 
     async fn get_workflow_execution(
@@ -32,6 +32,7 @@ pub trait PersistencePort: Send + Sync {
     ) -> Vec<NodeExecutionState>;
 }
 
+#[derive(Debug)]
 pub struct Repository {
     pub delegate: Arc<dyn PersistencePort>,
 }
@@ -80,7 +81,7 @@ impl Repository {
 
 #[derive(Debug)]
 pub enum PersistenceError {
-    ConditionFailure(String),
+    RaceCondition(String),
     Internal(String),
 }
 
